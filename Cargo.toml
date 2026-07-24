@@ -1,0 +1,28 @@
+# nymora — the open Nymora protocol library (self-contained; builds in isolation).
+# See ../PROJECT_STRUCTURE.md for the boundary rules governing this workspace.
+[workspace]
+resolver = "2"
+members = [
+    "nymora-core",
+    "nymora-crypto",
+    "nymora-accumulator",
+    "nymora-circuits",
+    "nymora-proofs",
+    "nymora-protocol",
+    "nymora-ports",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+rust-version = "1.75"
+# repository = "..."   # set when the public repo exists
+
+# Every crate in this workspace inherits these lints (see `[lints] workspace = true`).
+[workspace.lints.rust]
+unsafe_code = "forbid"        # nymora is pure protocol; all unsafe/FFI lives in ../bindings/
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+all = "warn"

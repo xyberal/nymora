@@ -1,0 +1,12 @@
+# Build output
+/target/
+
+# This is a library workspace, so the lockfile is not committed.
+/Cargo.lock
+
+# Local environment
+.env
+.env.*
+
+# macOS
+.DS_Store

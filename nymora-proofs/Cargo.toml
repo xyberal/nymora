@@ -1,0 +1,15 @@
+[package]
+name = "nymora-proofs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+nymora-core = { path = "../nymora-core" }
+nymora-crypto = { path = "../nymora-crypto" }
+nymora-accumulator = { path = "../nymora-accumulator" }
+nymora-circuits = { path = "../nymora-circuits" }

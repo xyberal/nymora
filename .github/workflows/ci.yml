@@ -1,0 +1,32 @@
+# nymora's OWN CI.
+#
+# DORMANT in the monorepo: GitHub only runs workflows found at the repository root under
+# .github/workflows/, and here this file lives at nymora/.github/workflows/. Once the
+# subtree-split makes nymora/ the ROOT of the public repo, this path becomes
+# .github/workflows/ci.yml and activates automatically. All commands below assume nymora/
+# is the working directory (true after the split; use `just nymora-ci` in the monorepo).
+name: nymora CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Lint
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Test
+        run: cargo test --all-features --workspace
+      - name: License headers
+        run: ./scripts/check-license-headers.sh
