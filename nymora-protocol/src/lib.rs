@@ -4,7 +4,7 @@
 //! roles: vouching, admission, revocation, dissolution, migration, re-keying, live auth.
 //! This is "the protocol as code" that a conformant Skiora and Persora must follow.
 //!
-//! Scaffold established in Step 1 (see `../SETUP.md`). No state machines implemented yet.
+//! Not yet implemented.
 
 /// Crate scaffold marker. Replaced by real protocol state machines in later steps.
 pub const SCAFFOLD: &str = "nymora-protocol";

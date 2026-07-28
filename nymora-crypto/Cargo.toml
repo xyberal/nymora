@@ -10,3 +10,7 @@ workspace = true
 
 [dependencies]
 nymora-core = { path = "../nymora-core" }
+# Byte-hash family (§6.4 requires HMAC, so a conventional hash is permanent, not a
+# placeholder). SHA-256 is hardware-accelerated on the arm64 devices Persora targets.
+sha2 = { version = "0.10", default-features = false }
+hkdf = { version = "0.12", default-features = false }

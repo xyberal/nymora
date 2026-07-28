@@ -12,22 +12,45 @@ Secure Enclave / StrongBox / WebAuthn, networking, and storage are inherently
 platform-specific. The core therefore cannot *contain* any of that.
 
 - **`nymora` is pure protocol** — no I/O, no clock, no network, no storage, no platform
-  APIs. It takes inputs, emits proofs and messages, and verifies. Deterministic and
-  portable.
-- **The host supplies platform-specific behavior** through a small set of trait interfaces
-  ("ports") the core defines in [`nymora-ports`](nymora-ports):
+  APIs, and no `async`. It takes inputs, emits proofs and messages, and verifies.
+  Deterministic and portable.
+- **The host supplies platform-specific behavior** through two trait interfaces ("ports")
+  the core defines in [`nymora-ports`](nymora-ports):
 
 | Port | Host implements with | Covers |
 |---|---|---|
-| `KeyStore` / `Authenticator` | iOS Secure Enclave · Android StrongBox · CLI software/YubiKey · web WebAuthn | Hardware custody of `sk_root`/`r_root`, epoch-cert signing, `r_epoch` derivation, user-presence prompt (§9.2) |
-| `SecureStorage` | Platform keychain / encrypted store | `sk_epoch`/`r_epoch`, receipt ledger (§10.2), cached roots (§8.3) |
-| `Transport` | Native HTTP + local QR/NFC/BLE | Talking to Skiora; in-person nonce exchange (§8.3) |
-| `EpochClock` | Host-provided | Current epoch, without baking a clock into the core |
+| `KeyStore` | iOS Secure Enclave · Android StrongBox · CLI software · FIDO2 key | The credential's root authority: creating it, signing epoch certificates and migrations, and reporting what the backend can actually do (§9.2) |
+| `SecureStorage` | Platform keychain / encrypted store | `sk_epoch`, `r_root`, receipt ledger (§10.2), cached roots (§8.3) |
 
 Keeping the engine pure is what makes it testable without mocks of the physical world, and
 what lets a single audited implementation serve every client — a security property in its
 own right, since divergent client implementations would produce distinguishable proof
 shapes (§6.5).
+
+### Sans-io: what is deliberately *not* a port
+
+`nymora` never performs I/O, so it does not abstract it:
+
+- **Networking is not a port.** The protocol state machines consume events and emit
+  messages; the host sends and receives them. This is the sans-io pattern, and it is what
+  "transport-agnostic state machines" means taken literally. Per-agora network isolation
+  (§16.2) is therefore a Persora obligation, not an engine trait — no interface inside
+  `nymora` could enforce it anyway.
+- **Time is not a port.** `Epoch` is passed in as a parameter. A clock trait would buy
+  nothing over the value itself and would cost testability.
+
+The practical dividend is that `nymora` contains no `async`, so it embeds in a CLI, an iOS
+app, an Android app, or wasm without imposing a runtime or colliding with the host's.
+
+### The root authority is abstract
+
+`KeyStore` exposes a **root authority** — a public key committed in the accumulator, able to
+sign epoch certificates — without revealing how many keys implement it. Creating one also
+yields an opaque `RootBinding` that the protocol carries but never parses.
+
+This is what keeps the hardware-custody question ([proposal 0001](spec/proposals/0001-two-level-root-key.md))
+off the critical path: whether the root is one hardware key, a hardware key binding a
+software key, or a key in a file changes the `KeyStore` implementation and nothing above it.
 
 ## Why one shared core
 
@@ -51,7 +74,7 @@ nymora-core          types, wire formats, agora_id, errors
    │      └── nymora-circuits       the one standardized ZK circuit (§6.5)
    │             └── nymora-proofs  attest / vouch / policy-check / live-auth
    │                    └── nymora-protocol   state machines, both roles
-   └── nymora-ports         KeyStore / SecureStorage / Transport / EpochClock
+   └── nymora-ports         KeyStore / SecureStorage
 ```
 
 Dependencies point one way only. `nymora-protocol` is the top of the graph: it defines the

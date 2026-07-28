@@ -27,7 +27,7 @@ supply those through the trait interfaces in [`nymora-ports`](nymora-ports).
 | `nymora-accumulator` | Fixed-depth Merkle accumulator |
 | `nymora-proofs` | Attestation / vouch / policy-check / live-auth proofs |
 | `nymora-protocol` | State machines + conformance vectors, both roles |
-| `nymora-ports` | `KeyStore` / `SecureStorage` / `Transport` / `EpochClock` traits |
+| `nymora-ports` | `KeyStore` and `SecureStorage` traits (the engine is sans-io) |
 
 ## Build
 

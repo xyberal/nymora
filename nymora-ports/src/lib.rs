@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! `nymora-ports` — the trait interfaces ("ports") the pure core defines for a host to
-//! implement: `KeyStore` / `Authenticator`, `SecureStorage`, `Transport`, `EpochClock`.
-//! See `../../ARCHITECTURE.md` for the pure-engine-plus-ports model, and `../../spec/`
-//! for the normative protocol specification.
+//! implement: `KeyStore` and `SecureStorage`.
 //!
-//! Scaffold established in Step 1 (see `../SETUP.md`). No ports defined yet.
+//! The engine is sans-io: networking and time are **not** ports. Protocol state machines
+//! consume events and emit messages, and the host performs the I/O. See
+//! `../../ARCHITECTURE.md` for the model, and `../../spec/` for the normative
+//! specification.
+//!
+//! Not yet implemented.
 
 /// Crate scaffold marker. Replaced by the real port traits in later steps.
 pub const SCAFFOLD: &str = "nymora-ports";

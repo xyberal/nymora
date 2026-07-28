@@ -1,5 +1,5 @@
 # nymora — the open Nymora protocol library (self-contained; builds in isolation).
-# See ../PROJECT_STRUCTURE.md for the boundary rules governing this workspace.
+# See ARCHITECTURE.md for the crate graph and the pure-engine-plus-ports model.
 [workspace]
 resolver = "2"
 members = [
@@ -16,7 +16,7 @@ members = [
 version = "0.0.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-rust-version = "1.75"
+rust-version = "1.81"   # core::error::Error (nymora-core is no_std)
 # repository = "..."   # set when the public repo exists
 
 # Every crate in this workspace inherits these lints (see `[lints] workspace = true`).

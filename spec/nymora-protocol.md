@@ -37,7 +37,7 @@ Read alongside:
 | **Attestation** | A zero-knowledge proof that a valid credential authored or corroborated a specific piece of content. |
 | **Tag** | An opaque routing value letting a member locate which agora/epoch a piece of content belongs to, without transmitting the agora's identity in the clear. |
 | **Transparency log** | An optional, per-agora, independently-replicated append-only log of identity-free state commitments (roots, policy changes, revocation-set root, pinned ledger heads), enabling any outside party to verify the machinery is run honestly without membership or identity access. |
-| **Receipt ledger** | A per-Persora hash-chained, append-only record of every action a credential takes, replayable by another Persora to confirm the client's history is complete, consistent, and non-forged. |
+| **Receipt ledger** | A per-credential hash-chained, append-only record of every action one credential takes within one agora, replayable by another Persora to confirm that history is complete, consistent, and non-forged. A member holding credentials in several agoras keeps a separate, unlinked ledger for each. |
 
 ### 2.1 System relationships
 
@@ -201,6 +201,14 @@ credential = {
 ```
 
 Attributes are provable in zero knowledge (e.g., "tier ≥ 2", "tenure ≥ 6 months") without revealing exact values, and — critically — **without revealing relative ordering or comparison against any other credential.** No API exposes "which credential is oldest" or "how many vouches does X have relative to Y." Thresholds themselves can optionally be evaluated by a Proof Generation service so that even the credential holder never learns the exact numeric policy constants, only a binary grant/deny.
+
+**Credentials are per-agora and mutually unlinkable.** A member holding credentials in several agoras holds a wholly separate credential in each. This is a normative requirement, not an implementation preference, and it is what §13's statement that one Persora may serve any number of agoras depends on:
+
+- All key material — the hardware anchor, the protocol root, the commitment opening value, and every epoch key — is generated **freshly and independently per agora**. It is not derived from a shared seed or master secret, however convenient that would be for backup: a common seed would make compromise of one agora's material a compromise of all, and would let an adversary holding it test membership in any agora whose identifier they can name.
+- **No value derived within one agora is ever reused in, or derivable from, another.** This covers nullifiers, pseudonyms, commitments, tags, ledger entries, and any handle presented to a Skiora.
+- **No interface accepts or returns state spanning more than one agora.** Nothing a Persora presents to any Skiora reveals that other memberships exist, how many there are, or which.
+
+The standardized circuit (§6.5) is deliberately shared across agoras; sharing a *circuit* is what makes proofs indistinguishable, whereas sharing a *witness* would make them linkable. No proof instance takes a witness from more than one agora. The operational consequences of holding several memberships are covered in §16.
 
 ### 5.2 Accumulators
 
@@ -531,7 +539,8 @@ Rather than one flat `sk`, each member's credential is split into two tiers:
 
 ```
 sk_root   — committed (via its public counterpart) in the agora's accumulator; used rarely
-sk_epoch  — freshly derived each epoch; used for routine, day-to-day operations
+sk_epoch  — freshly generated each epoch and certified by sk_root; used for routine,
+            day-to-day operations
 ```
 
 The accumulator leaf commits to `pk_root` (a public verification key derived from `sk_root`), using an opening value `r_root` fixed once at credential creation:
@@ -546,12 +555,16 @@ leaf = Commit(pk_root, r_root)
 epoch_cert = Sign(sk_root, {epoch_number, pk_epoch})
 ```
 
+**Epoch keys are generated, never derived.** Each epoch's `sk_epoch` is sampled independently from the device's cryptographically secure random source. It is never computed from `sk_root`, from `r_root`, from a recovery seed, or from the preceding epoch's key — including by a one-way ratchet. `epoch_cert` is what makes a freshly generated key valid; derivation is not a shortcut for that step but a defeat of it. Deriving from long-lived material would let anyone who later obtains that material recompute every past epoch key, and with them every past nullifier, retroactively linking activity that the epoch structure exists to keep separate; deriving from the previous epoch's key would let a single epoch's compromise extend to every epoch after it, silently re-certified by the member's own honest rollover.
+
+The corollary is a deletion requirement: once rollover completes, the previous epoch's key is destroyed. Forward secrecy across epochs rests on that deletion, not on the derivation structure — there is none.
+
 Every ordinary proof — vouching, authoring content, corroborating, live authentication (§8) — uses `sk_epoch`, together with `epoch_cert`, inside a single zero-knowledge proof that checks the whole chain without ever exposing `pk_epoch` or the certificate as plaintext:
 
 ```
-∃ sk_epoch, r_epoch, pk_epoch, epoch_cert, merkle_path such that:
+∃ sk_epoch, r_root, pk_epoch, epoch_cert, merkle_path such that:
   epoch_cert verifies as a valid signature over pk_epoch, by some pk_root committed in Root_tier2
-  ∧ r_epoch is correctly derived for this credential and epoch
+  ∧ r_root correctly opens that credential's committed leaf
   ∧ nullifier = Hash(sk_epoch, message_hash, agora_id)
 ```
 
@@ -561,22 +574,18 @@ Every ordinary proof — vouching, authoring content, corroborating, live authen
 
 **What this does not bound:** compromise of `sk_root` itself. Since `sk_root` can sign arbitrary future epoch certificates and is the credential authorized to participate in root-level governance actions (quorum votes, re-keying, dissolution — §5.3, §12), its compromise is effectively total and permanent for that credential, which is precisely why `sk_root` deserves the heavier protection described next, rather than living alongside `sk_epoch` in the same routinely-used storage.
 
-**The commitment-opening value `r` is rotated on the same schedule as `sk_epoch`, not held static for the credential's lifetime.** Every proof of root-leaf membership requires `r` as a witness alongside `sk_root` — a static, unrotated `r_root` reused across every proof for the credential's entire lifetime would carry the same exposure profile as `sk_root` itself, but without any of `sk_root`'s hardware protection (§9.2), since `r` has no independent reason to be treated as sensitive and would otherwise sit in ordinary Persora storage indefinitely. To avoid this asymmetry, `r_root` is never resupplied directly by routine proofs. Instead, an epoch-scoped opening value is derived the same way `sk_epoch` is:
+**`r_root` is a blinding value, not authority, and is held in software.** Every proof of root-leaf membership must open `Commit(pk_root, r_root)`, which requires `r_root` itself as a witness. No per-epoch substitute is possible: any derivation one-way enough to protect `r_root` is, by construction, unable to open a commitment formed with it. `r_root` is therefore supplied on every routine proof, and cannot meaningfully be held in hardware custody — a value exported on every operation is not hardware-held in any useful sense.
 
-```
-r_epoch = KDF(r_root, epoch_number)
-```
-
-Routine proofs (vouching, authoring, corroborating, live authentication, policy approval) use `r_epoch` as the membership-inclusion witness rather than `r_root` directly, exactly mirroring how they use `sk_epoch` rather than `sk_root`. A compromise of `r_epoch` is bounded to the epoch it was derived for, consistent with the compromise bound already established for `sk_epoch` — a leaked `r_epoch` does not expose `r_root`, and does not extend the exposure window beyond the epoch in which it was used. `r_root` itself, like `sk_root`, is touched only during epoch rollover (to derive the next `r_epoch`) and governance actions, and should receive equivalent protection — ideally held alongside `sk_root` in the same hardware-backed custody described in §9.2, rather than left in ordinary app storage where a device compromise could recover it independently of `sk_root`.
+This is acceptable because `r_root` authorizes nothing. Its sole function is to hide `pk_root` from Skiora, which receives only the commitment at credential creation. An adversary holding `r_root` alone can forge no proof, sign no certificate, and impersonate no one; the value becomes useful only in combination with a candidate `pk_root`, and an adversary positioned to obtain both already holds the device. `r_root` is stored with `sk_epoch` in ordinary OS-protected storage, and is not rotated.
 
 ```mermaid
 graph TD
     HW["Hardware authenticator<br/>(secure enclave / FIDO2 key)<br/><i>§9.2 — non-exportable</i>"]
-    HW -->|generates internally| SKR["sk_root, r_root<br/><i>used rarely: epoch certs,<br/>governance quorum actions</i>"]
+    HW -->|generates internally| SKR["sk_root<br/><i>used rarely: epoch certs,<br/>governance quorum actions</i>"]
     SKR -->|derives| PKR["pk_root<br/><i>committed in accumulator:<br/>leaf = Commit(pk_root, r_root)</i>"]
     SKR -->|"signs each epoch"| CERT["epoch_cert = Sign(sk_root,<br/>{epoch_number, pk_epoch})"]
 
-    CERT -.->|"certifies"| SKE["sk_epoch, r_epoch<br/><i>fresh per epoch, software-held,<br/>used for all routine ops</i>"]
+    CERT -.->|"certifies"| SKE["sk_epoch + r_root<br/><i>epoch key generated fresh each epoch;<br/>r_root static, software-held;<br/>used for all routine ops</i>"]
 
     SKE --> V["Vouching (§5.3)"]
     SKE --> AU["Authoring / corroborating (§6)"]
@@ -590,30 +599,35 @@ graph TD
     style CERT fill:#1a1a2e,stroke:#8888aa,color:#eee
 ```
 
-Compromise of `sk_epoch`/`r_epoch` (the pair touched by every routine operation) is bounded to one epoch. Compromise of `sk_root`/`r_root` (touched only rarely, and ideally hardware-bound per §9.2) is total and permanent for that credential — which is exactly why the two pairs are never stored or used together.
+Compromise of `sk_epoch` and `r_root` (the pair touched by every routine operation) is bounded to one epoch for impersonation purposes: `r_root` grants no authority on its own, and `sk_epoch` expires. Compromise of `sk_root` (touched only rarely, and ideally hardware-bound per §9.2) is total and permanent for that credential — which is exactly why it is never stored or used alongside the routine pair.
 
 ### 9.2 Hardware-backed custody of the root key
 
 `sk_root` is used rarely (epoch rollover, governance quorum actions) and is catastrophic if exposed — exactly the profile suited to hardware-backed key custody rather than ordinary app-managed storage.
 
-**Mechanism.** Persora delegates generation and use of `sk_root` and `r_root` to a hardware authenticator — a phone's secure enclave (Apple Secure Enclave, Android StrongBox), a discrete security key (YubiKey-class), or an equivalent FIDO2/WebAuthn-compatible element. The authenticator generates both values internally, using its own random number generator; neither leaves the hardware in any form, encrypted or otherwise. Persora holds only a reference to the hardware-resident key material and requests operations from it:
+**Mechanism.** Persora delegates generation and use of `sk_root` to a hardware authenticator — a phone's secure enclave (Apple Secure Enclave, Android StrongBox), a discrete security key (YubiKey-class), or an equivalent FIDO2/WebAuthn-compatible element. The authenticator generates it internally, using its own random number generator; it never leaves the hardware in any form, encrypted or otherwise. Persora holds only a reference to the hardware-resident key and requests operations from it:
 
 ```
-Persora → authenticator: "generate a new keypair and opening value scoped to agora_id X"
-authenticator → Persora: pk_root   (sk_root and r_root never leave the secure element)
+Persora → authenticator: "generate a new keypair scoped to agora_id X"
+authenticator → Persora: pk_root   (sk_root never leaves the secure element)
 
-Persora → authenticator: "sign this epoch-certificate payload; derive r_epoch"
+Persora → authenticator: "sign this epoch-certificate payload"
 authenticator → prompts for biometric/PIN (user-presence check)
-authenticator → Persora: signature bytes, r_epoch
+authenticator → Persora: signature bytes
 ```
 
 **Per-agora scoping is native to this pattern.** WebAuthn/FIDO2 authenticators already generate a distinct, unrelated keypair per relying-party context by design — treating each `agora_id` as its own relying-party identifier means "one unlinked root credential per agora" (a requirement already established in §5.1) is enforced by the hardware's own architecture, not solely by Persora's own software discipline.
 
-**`sk_epoch` and `r_epoch` remain software-managed.** Given how frequently they are used (every vouch, post, corroboration, and live-authentication event), requiring a hardware user-presence prompt for every single operation would be impractical. Both are generated and held by Persora in ordinary (ideally still OS-level-protected, e.g., platform keychain) storage, accepting the bounded, epoch-scoped exposure described in §9.1 as the practical tradeoff for usability.
+**`sk_epoch` and `r_root` remain software-managed.** `sk_epoch` is used on every vouch, post, corroboration, and live-authentication event, and requiring a hardware user-presence prompt for each would be impractical; `r_root` must be supplied as the membership-opening witness on every proof and so cannot be hardware-held at all (§9.1). Both are generated and held by Persora in ordinary (ideally still OS-level-protected, e.g., platform keychain) storage, accepting the exposure described in §9.1 as the practical tradeoff for usability.
 
 **What this defends against, precisely.** Hardware-backed custody closes the most common real-world compromise path: malware or a compromised app silently reading a key out of accessible storage. Secure elements are specifically engineered to resist this, and resisting casual forensic extraction from a seized, locked device is an explicit design goal of most modern implementations.
 
 **What this does not defend against, stated plainly.** A sufficiently resourced adversary with specialized hardware-attack capability (side-channel analysis, chip decapping, fault injection) can, in principle, still defeat some secure elements — hardware backing raises this bar substantially but does not make it absolute, and claiming otherwise would overstate the guarantee. More importantly: hardware custody does nothing against **coercion**. If an adversary has physical control of both the device and its legitimate, present user (willingly or under duress), the hardware will perform whatever signing operation is requested, since "user presence verified" is exactly what coercion produces. This is consistent with the standing principle throughout this design that cryptography bounds what remote or silent compromise can achieve; it does not, and cannot, protect against a present and compelled legitimate user.
+
+**Authenticator-level identifiers can link credentials that the protocol keeps separate.** Per-agora key scoping isolates the keys, not necessarily the device that holds them. Two details deserve checking against any authenticator before it is relied upon:
+
+- **Signature counters.** WebAuthn authenticators return a counter with each assertion, and some maintain it globally across all credentials rather than per credential. Two Skiora deployments comparing counter values could correlate credentials held on the same authenticator — exactly the cross-agora link §5.1 forbids. Prefer authenticators with per-credential counters or none at all.
+- **Relying-party identifiers.** Treating each `agora_id` as its own relying-party context works directly with platform key stores, where keys are scoped by an arbitrary alias. It does not translate cleanly to WebAuthn/CTAP2, whose relying-party identifier must be a valid domain rather than an opaque value; per-agora hardware scoping may therefore be unavailable on precisely the discrete security keys this section otherwise recommends. Where it cannot be enforced by the authenticator, Persora must enforce it in software and should say so plainly to the member.
 
 **Attestation tradeoff.** Hardware authenticators can optionally prove, cryptographically, that a key was genuinely generated in approved hardware rather than spoofed in software. If the agora's policy requires this, the attestation should be checked and consumed entirely inside a zero-knowledge proof at credential-registration time — never transmitted or stored as a raw, inspectable attestation certificate — since raw attestation data commonly reveals authenticator make/model and sometimes batch-level identifiers, which would introduce a new fingerprinting vector this design has otherwise worked to eliminate.
 
@@ -719,6 +733,8 @@ A second Persora — chosen by the member, or verifiably-randomly selected (§10
 
 The ledger records abuse faithfully; it does not prevent it. A compromised Persora that vouches for a malicious candidate writes a truthful entry saying so — detection and accountability, not prevention.
 
+**One ledger per credential, never one per person.** A member in several agoras maintains a separate chain for each, and a replay witness sees only the chain for the agora it was asked about. A single ledger spanning a member's agoras would hand any witness — including a verifiably-randomly selected one (§10.4) — the member's full cross-agora activity, and with it the fact that those memberships share an owner. The witness learns that some credential's history is consistent; it learns nothing about any other agora, and cannot tell whether the member belongs to any.
+
 ### 10.3 Enforced logging and head-pinning
 
 A tamper-evident chain only proves the entries *in it* are consistent; it says nothing about entries never written. A rogue Persora could therefore keep two sets of books — a clean "show" ledger and a real hidden one — unless logging is *enforced*. Skiora provides that enforcement:
@@ -814,5 +830,44 @@ Whoever operates a given agora's Skiora — self-hosted by the group, or a chose
 - **Governance**: Agoras mutate admission policy and thresholds at will via quorum, and can be permanently and verifiably dissolved through irreversible multi-party key destruction.
 - **Live authentication**: Two or more members actively communicating — over a network channel or in person — can mutually confirm, in real time, that everyone present holds a genuine, currently-valid credential and actually possesses its secret key, using a jointly-derived, replay-resistant session context and, for in-person settings, a human-verified short authentication string in place of network-channel binding.
 - **Key custody and continuity**: A root/epoch key hierarchy bounds the damage of routine compromise to a single epoch, hardware-backed authenticators protect the rarely-used root key against silent extraction, and dual migration/re-vouching paths let a member change devices with or without preserving reputation continuity, depending on whether their prior device remains reachable.
-- **Integrity and auditability**: An optional per-agora append-only transparency log lets any independent outside party verify the machinery is run honestly — non-equivocation, append-only integrity, and protocol conformance — without any membership or identity access; per-Persora hash-chained receipt ledgers, with enforced logging and publicly-checkpointed head-pinning, make a rogue client's own action history complete, non-forkable, and independently replayable, so client misbehavior cannot be hidden or denied even though it cannot always be prevented.
+- **Integrity and auditability**: An optional per-agora append-only transparency log lets any independent outside party verify the machinery is run honestly — non-equivocation, append-only integrity, and protocol conformance — without any membership or identity access; per-credential hash-chained receipt ledgers, with enforced logging and publicly-checkpointed head-pinning, make a rogue client's own action history complete, non-forkable, and independently replayable, so client misbehavior cannot be hidden or denied even though it cannot always be prevented.
+- **Multi-agora membership**: One Persora may hold credentials in any number of agoras, each a separate cryptographic domain sharing no key material and no derived value, so that no agora — and no observer — learns that a member belongs to any other.
 
+
+---
+
+## 16. Multi-Agora Membership
+
+A person may belong to several agoras at once, holding one credential in each through a single Persora (§13). The agoras must remain mutually invisible: no agora, and no observer, should learn that a member belongs to any other. §5.1 states the credential-level requirement; this section covers what follows from it in practice, and where it stops.
+
+### 16.1 What isolation covers
+
+Each membership is a self-contained cryptographic domain. Keys, accumulators, roots, epoch schedules, policies, tag keys, and receipt ledgers are per agora and share nothing. Standing in one agora confers nothing in another — a member at a high tier with long tenure begins any other agora as an ordinary candidate, admitted through the same vouching flow as anyone else (§5.3). There is no cross-agora reputation, and deliberately so: a transferable standing would be a linkable one.
+
+Because nullifiers are namespace-bound (§6.1) and the circuit is shared across all agoras (§6.5), two attestations by the same person in two agoras are, to any observer, unrelated artifacts of identical shape.
+
+### 16.2 What isolation does not cover
+
+The protocol isolates cryptographic material. It does not isolate the device, the network stack, or the human operating them, and multiple memberships concentrate that residual exposure rather than merely repeating it:
+
+- **Network correlation.** Several memberships mean traffic to several Skiora deployments from one host, on correlated schedules. An observer of the network — or an adversary operating or compelling two of those deployments — can associate the memberships without examining a single proof. Per-agora network isolation (a distinct anonymity-network circuit per agora, never reused) is the practical mitigation, and for members in several agoras it should be treated as a requirement rather than a refinement.
+- **Timing.** Activity that clusters across agoras — epoch rollovers performed together, sessions opened in sequence, migrations run in one sitting (§16.3) — produces correlation the cryptography cannot mask. Persora should avoid scheduling per-agora maintenance in lockstep.
+- **The authenticator**, per §9.2's caveats on signature counters and relying-party scoping.
+- **The person.** Recruitment patterns, writing style, and availability windows are unaffected by any mechanism here, and someone active in several agoras presents more material to correlate. This is §15's social-leakage limitation, amplified by membership count.
+
+### 16.3 Device migration across several agoras
+
+Migration (§9.3) is per agora: one certificate, one Skiora, one accumulator update each. A member in several agoras performs several independent migrations, and the protocol offers no way to batch them — by construction, since no component has a cross-agora view.
+
+That independence is the point, and it is also the hazard. Several migrations executed in one sitting from one new device produce a tight cluster of credential replacements across otherwise unrelated Skiora deployments: a strong signal that those credentials share an owner, available to anyone observing more than one of them. **Migrations should therefore be staggered** — separated in time, and carried over distinct network paths. Persora is the only component positioned to help here, since it alone knows the set, and it should encourage staggering rather than offering a convenient migrate-everything action.
+
+The lost-device path (§9.3, Path 2) is worse in proportion. Each agora requires independent quorum revocation and fresh vouching, each involving other members and each generating its own visible activity. A member in several agoras who loses a device faces a recovery burden that scales linearly and cannot be consolidated. Groups should expect this, and members should weigh it when deciding how many memberships to hold on one device.
+
+### 16.4 Practical ceilings
+
+Nothing limits membership count cryptographically, but two costs grow with it:
+
+- **Tag resolution** (§6.4) is proportional to the number of held agoras multiplied by the number of cached epochs per agora, since an incoming tag must be tried against every held key. The work is individually trivial and the growth is linear, but it is not free, and the trial loop must not vary observably in duration according to which key matched.
+- **Hardware credential slots** are finite on discrete authenticators, often a few dozen resident credentials. A member in many agoras may exhaust them.
+
+Persora should make the number of held memberships visible to the member, since the operational cost of each — migration burden, network discipline, recovery exposure — is borne by them and is not otherwise apparent.

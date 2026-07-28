@@ -7,6 +7,15 @@ and **Persora** (client) implementation must do.
 |---|---|
 | [nymora-protocol.md](nymora-protocol.md) | §2–§14 — vocabulary, membership and vouching, content provenance, verification, live authentication, key hierarchy, integrity/auditability, revocation, dissolution, deployment |
 | [threat-model.md](threat-model.md) | §1 — purpose and adversary model · §15 — known limitations and what the design does *not* solve |
+| [proposals/](proposals) | Proposed amendments under review, with the replacement text they would apply |
+
+## Proposals
+
+Changes to a normative section are drafted in `proposals/` before they are applied, so the
+reasoning survives alongside the outcome. Each proposal states the problem, the decision,
+the alternatives rejected and why, the exact replacement text, and its consequences. A
+proposal is applied to the specification only once its status says so; until then the
+sections above remain authoritative.
 
 **Protocol version:** `0.0.0` (pre-release; the specification is a design draft and may
 change incompatibly).

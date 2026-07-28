@@ -8,4 +8,9 @@ rust-version.workspace = true
 [lints]
 workspace = true
 
+# Deliberately no cryptographic dependencies: this crate performs no field arithmetic.
+# The two below are memory-hygiene primitives, not cryptography — `zeroize` for secret
+# erasure that the optimiser cannot elide, `subtle` for constant-time comparison.
 [dependencies]
+zeroize = { version = "1", default-features = false }
+subtle = { version = "2", default-features = false }
