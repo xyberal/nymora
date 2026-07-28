@@ -28,5 +28,9 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Test
         run: cargo test --all-features --workspace
+      # --all-features would never exercise the build that omits the stand-in algebraic
+      # hash, which is the configuration to check against before shipping.
+      - name: Test without the provisional algebraic hash
+        run: cargo test -p nymora-crypto --no-default-features
       - name: License headers
         run: ./scripts/check-license-headers.sh

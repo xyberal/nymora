@@ -34,7 +34,7 @@ Read alongside:
 | **Credential** | A member's anonymous, attribute-bearing cryptographic identity within one agora. |
 | **Accumulator** | A Merkle tree whose root represents the current set of valid entries (members, voucher-eligible members, etc.) for a policy class. |
 | **Nullifier** | A per-context deterministic hash derived from a member's secret key, used to enforce distinctness (no double-vouching, no double-attesting) without revealing identity. |
-| **Attestation** | A zero-knowledge proof that a valid credential authored or corroborated a specific piece of content. |
+| **Attestation** | A zero-knowledge proof that a valid credential authored a specific piece of content. |
 | **Tag** | An opaque routing value letting a member locate which agora/epoch a piece of content belongs to, without transmitting the agora's identity in the clear. |
 | **Transparency log** | An optional, per-agora, independently-replicated append-only log of identity-free state commitments (roots, policy changes, revocation-set root, pinned ledger heads), enabling any outside party to verify the machinery is run honestly without membership or identity access. |
 | **Receipt ledger** | A per-credential hash-chained, append-only record of every action one credential takes within one agora, replayable by another Persora to confirm that history is complete, consistent, and non-forged. A member holding credentials in several agoras keeps a separate, unlinked ledger for each. |
@@ -167,6 +167,8 @@ POST /agora/{agora_id}/policy/tier2/proposal/{id}/activate
   → { policy_version: 2 }
 ```
 
+A proposal expires at the end of the epoch in which it was raised, and must be re-raised to continue. This is not an administrative convenience: approvals are counted by nullifier, nullifiers are scoped to an epoch key (§9.1), and a proposal outliving that key could be approved a second time by the same credential under its successor.
+
 Charlie, Dave, and all future members are vouched in via the identical 2-of-N (or higher) threshold flow. No credential anywhere in the agora carries a "founder" flag or distinct issuance type — every credential is structurally indistinguishable, differing only in the unavoidable fact of when it entered the accumulator.
 
 ### 4.4 Re-key to multi-party custody
@@ -237,6 +239,8 @@ POST /agora/{agora_id}/vouch/session/{id}/attest
 POST /agora/{agora_id}/vouch/session/{id}/finalize
   → { threshold_met: true, credential_update_token }
 ```
+
+A vouch session must finalize within the epoch in which it was opened; one that does not is abandoned rather than carried over. As with policy proposals (§4.3), the threshold is counted by nullifier, and a session spanning an epoch boundary would let a single credential attest twice under two keys.
 
 Each attestation proof demonstrates, in zero knowledge:
 
@@ -312,7 +316,9 @@ The proof is bound to `message_hash` via the Fiat-Shamir challenge, so it cannot
 - **Externally**, every attestation proves only "a valid Tier-K+ member of this agora stands behind this content" — undifferentiated between authors, with no persistent field of any kind carried across posts. Two pieces of content from the same author are, to an outside observer, structurally unrelated.
 - **Internally**, members may optionally track recurring-author reliability using a separate continuity mechanism (a zero-knowledge proof of "this pseudonym derives from the same secret as a prior one"), generated and checked only within member-only tooling, and **never serialized into anything that leaves the agora**. This is a stronger guarantee than access-controlling a shared field — the linking information is never transmitted externally at all, regardless of what keys an adversary might someday obtain.
 
-### 6.3 Corroboration
+### 6.3 Corroboration — deferred
+
+**Deferred to a later protocol version (proposal 0006).** The mechanism below is specified but not implemented. Read the note at the end of this section before reintroducing it: corroboration is coupled to the nullifier construction in §9.1 and cannot be re-added as an isolated feature.
 
 Other members may independently attest to the same content:
 
@@ -323,6 +329,8 @@ POST /agora/{agora_id}/proofs/message-attestation
 ```
 
 Nullifier-distinctness (`N_msg` bound to the corroborator's own secret key) prevents one member faking multiple independent corroborations under different guises. **Corroboration carries no persistent pseudonym at all.** A stable per-corroborator identifier would let an observer collecting many corroborated posts over time build a co-occurrence table (which corroborators repeatedly appear alongside which authors), reconstructing a social proximity graph even without ever breaking individual anonymity. Every corroboration event is single-message-scoped and mutually unlinkable across posts, closing this.
+
+**Reintroducing this section reopens the nullifier decision.** Corroboration is the only context in the protocol where a public object accepts actions indefinitely. That combination requires a nullifier key outliving epochs, and such a key lets anyone holding it recompute the nullifier for every published bundle and determine which the member corroborated — retroactively, for the life of the credential. Proposal 0005 was settled on the assumption that this section is deferred. Reversing that assumption reverses 0005's conclusion; the two must be reconsidered together.
 
 ### 6.4 Routing without exposing agora identity
 
@@ -367,12 +375,11 @@ On the wire: a small, fixed-size proof blob plus `message_hash` and `nullifier`.
     "proof": "<fixed-size SNARK blob>",
     "message_hash": "<Hash(M)>",
     "nullifier": "<32-byte value>"
-  },
-  "corroborations": [
-    { "proof": "...", "nullifier": "..." }
-  ]
+  }
 }
 ```
+
+The `corroborations` array is absent in this version (§6.3). It is omitted rather than sent empty: an always-empty array would be a field every bundle carries and no bundle uses, and canonical serialization admits no ambiguity between absent and empty.
 
 No `agora_id`, no root, no epoch marker, no pseudonym of any kind is present. Everything a verifier needs beyond this bundle comes from material the verifier already independently and legitimately holds as a member.
 
@@ -543,10 +550,10 @@ sk_epoch  — freshly generated each epoch and certified by sk_root; used for ro
             day-to-day operations
 ```
 
-The accumulator leaf commits to `pk_root` (a public verification key derived from `sk_root`), using an opening value `r_root` fixed once at credential creation:
+The accumulator leaf commits to `pk_root` (a public verification key derived from `sk_root`) and to `sk_migrate` (below), using an opening value `r_root` fixed once at credential creation:
 
 ```
-leaf = Commit(pk_root, r_root)
+leaf = Commit(pk_root, sk_migrate, r_root)
 ```
 
 `sk_root`'s only routine job is to **certify a new epoch key** when one is generated:
@@ -558,6 +565,10 @@ epoch_cert = Sign(sk_root, {epoch_number, pk_epoch})
 **Epoch keys are generated, never derived.** Each epoch's `sk_epoch` is sampled independently from the device's cryptographically secure random source. It is never computed from `sk_root`, from `r_root`, from a recovery seed, or from the preceding epoch's key — including by a one-way ratchet. `epoch_cert` is what makes a freshly generated key valid; derivation is not a shortcut for that step but a defeat of it. Deriving from long-lived material would let anyone who later obtains that material recompute every past epoch key, and with them every past nullifier, retroactively linking activity that the epoch structure exists to keep separate; deriving from the previous epoch's key would let a single epoch's compromise extend to every epoch after it, silently re-certified by the member's own honest rollover.
 
 The corollary is a deletion requirement: once rollover completes, the previous epoch's key is destroyed. Forward secrecy across epochs rests on that deletion, not on the derivation structure — there is none.
+
+**Nullifier keys are scoped to the window they guard.** A nullifier enforces "at most once" only for the lifetime of the key that produced it, and the verifier has no other handle on identity to fall back on. Vouching (§5.3), policy approval (§4.3), and authorship (§6.1) guard objects that live within a single epoch, and use `sk_epoch` accordingly.
+
+Migration is the exception. A credential leaf remains in the accumulator indefinitely, so its consuming nullifier must remain valid indefinitely. Each credential therefore carries `sk_migrate`, generated at creation, committed in its leaf, never rotated, and used for no other purpose. Like `r_root` it is a witness the circuit recomputes against, so it is exported on every migration proof and held in software rather than hardware.
 
 Every ordinary proof — vouching, authoring content, corroborating, live authentication (§8) — uses `sk_epoch`, together with `epoch_cert`, inside a single zero-knowledge proof that checks the whole chain without ever exposing `pk_epoch` or the certificate as plaintext:
 
@@ -572,6 +583,8 @@ Every ordinary proof — vouching, authoring content, corroborating, live authen
 
 **What this bounds:** if `sk_epoch` is compromised, the attacker can forge nullifiers and impersonate the member only for that one epoch — including retroactively recomputing that epoch's own past nullifiers, since `Hash(sk_epoch, context)` is deterministic. Prior epochs' keys have already been discarded and cannot be reconstructed from the current one, so past activity outside the compromised epoch stays unlinkable even to someone holding the current key. This is the same forward-secrecy principle behind ratcheting message keys, applied here to credential-derived nullifiers.
 
+Attribution is bounded with it, with one exception. `sk_migrate` is durable by necessity, so an adversary holding it can confirm that two leaves belong to the same credential lineage across a migration. That is a single linkage per migration; it does not extend to content, whose nullifiers expire with the epoch key that produced them.
+
 **What this does not bound:** compromise of `sk_root` itself. Since `sk_root` can sign arbitrary future epoch certificates and is the credential authorized to participate in root-level governance actions (quorum votes, re-keying, dissolution — §5.3, §12), its compromise is effectively total and permanent for that credential, which is precisely why `sk_root` deserves the heavier protection described next, rather than living alongside `sk_epoch` in the same routinely-used storage.
 
 **`r_root` is a blinding value, not authority, and is held in software.** Every proof of root-leaf membership must open `Commit(pk_root, r_root)`, which requires `r_root` itself as a witness. No per-epoch substitute is possible: any derivation one-way enough to protect `r_root` is, by construction, unable to open a commitment formed with it. `r_root` is therefore supplied on every routine proof, and cannot meaningfully be held in hardware custody — a value exported on every operation is not hardware-held in any useful sense.
@@ -582,10 +595,10 @@ This is acceptable because `r_root` authorizes nothing. Its sole function is to 
 graph TD
     HW["Hardware authenticator<br/>(secure enclave / FIDO2 key)<br/><i>§9.2 — non-exportable</i>"]
     HW -->|generates internally| SKR["sk_root<br/><i>used rarely: epoch certs,<br/>governance quorum actions</i>"]
-    SKR -->|derives| PKR["pk_root<br/><i>committed in accumulator:<br/>leaf = Commit(pk_root, r_root)</i>"]
+    SKR -->|derives| PKR["pk_root<br/><i>committed in accumulator:<br/>leaf = Commit(pk_root, sk_migrate, r_root)</i>"]
     SKR -->|"signs each epoch"| CERT["epoch_cert = Sign(sk_root,<br/>{epoch_number, pk_epoch})"]
 
-    CERT -.->|"certifies"| SKE["sk_epoch + r_root<br/><i>epoch key generated fresh each epoch;<br/>r_root static, software-held;<br/>used for all routine ops</i>"]
+    CERT -.->|"certifies"| SKE["sk_epoch + r_root + sk_migrate<br/><i>epoch key generated fresh each epoch;<br/>r_root and sk_migrate static, software-held;<br/>used for all routine ops</i>"]
 
     SKE --> V["Vouching (§5.3)"]
     SKE --> AU["Authoring / corroborating (§6)"]
@@ -640,12 +653,15 @@ A direct consequence of non-exportable, hardware-bound root keys: a device chang
 ```
 Old device: migration_cert = Sign(sk_root_old, {pk_root_new, agora_id})
 New device: generates a fresh (sk_root_new, r_root_new, pk_root_new) internally, hardware-backed as in §9.2
+            carries sk_migrate over from the old credential — it is not regenerated
 
 POST /agora/{agora_id}/credentials/migrate
-  body: { migration_cert, new_commitment: Commit(pk_root_new, r_root_new) }
+  body: { migration_cert, new_commitment: Commit(pk_root_new, sk_migrate, r_root_new) }
 ```
 
 The migration is verified (ideally itself wrapped in a ZK proof rather than transmitted with `pk_root_old` in the clear, consistent with this design's general avoidance of exposing linkable identifiers) against the old, still-valid leaf. On success, the agora's accumulator attributes — tenure, vouch count, tier — carry over to the new leaf, and the old leaf is consumed via a migration-specific nullifier, preventing a still-live old key from being used to spawn more than one successor credential.
+
+The successor leaf commits to the **same** `sk_migrate` as the leaf it replaces, proven in zero knowledge alongside the migration itself. Were a fresh key generated instead, each migration would launder the nullifier consuming the previous leaf, and a member could spawn successor credentials without limit — every one of them carrying the tenure, vouch count, and tier of the original. Path 2 cannot preserve `sk_migrate`, since it presumes the old key is unreachable; uniqueness resets there, gated by the quorum revocation that path already requires.
 
 **Path 2 — lost, stolen, or seized device (old device unreachable).** No migration certificate can be produced without the old key, so this path falls back to ordinary quorum-based revocation (§11) of the old credential, followed by fresh admission on new hardware via the standard vouching flow (§5.3). No continuity is preserved — this is the accepted cost when the old key genuinely cannot be reached. The group may choose to accelerate re-vouching for a known, previously-vouched member (existing vouchers can re-attest quickly, since the real-world trust judgment hasn't changed, only the cryptographic anchor), but the resulting credential is, structurally, new.
 
@@ -826,7 +842,7 @@ Whoever operates a given agora's Skiora — self-hosted by the group, or a chose
 ## 14. Summary of Capabilities
 
 - **Membership**: Anonymous, threshold-vouched admission into tiered agoras, with zero-knowledge proofs verifying eligibility and credentials without revealing which specific member acted, bootstrapped from a single founder with no special-cased founding infrastructure.
-- **Content**: Authored and corroborated content carries unlinkable, message-bound attestations proving "a real group member stands behind this" externally, while richer authorship/reliability tracking and revocation status remain visible only to members internally.
+- **Content**: Authored content carries unlinkable, message-bound attestations proving "a real group member stands behind this" externally, while richer authorship/reliability tracking and revocation status remain visible only to members internally.
 - **Governance**: Agoras mutate admission policy and thresholds at will via quorum, and can be permanently and verifiably dissolved through irreversible multi-party key destruction.
 - **Live authentication**: Two or more members actively communicating — over a network channel or in person — can mutually confirm, in real time, that everyone present holds a genuine, currently-valid credential and actually possesses its secret key, using a jointly-derived, replay-resistant session context and, for in-person settings, a human-verified short authentication string in place of network-channel binding.
 - **Key custody and continuity**: A root/epoch key hierarchy bounds the damage of routine compromise to a single epoch, hardware-backed authenticators protect the rarely-used root key against silent extraction, and dual migration/re-vouching paths let a member change devices with or without preserving reputation continuity, depending on whether their prior device remains reachable.

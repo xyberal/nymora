@@ -16,7 +16,21 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Specification §16, Multi-Agora Membership, and a normative per-agora credential isolation
   requirement in §5.1 (proposal 0002).
 
+### Changed
+- Corroboration (§6.3) is **deferred** to a later protocol version; the external bundle
+  (§6.6) carries no `corroborations` array. The section remains specified, with a note that
+  reintroducing it reopens the nullifier decision below — it is not an isolated feature
+  (proposal 0006).
+
 ### Fixed
+- Specification §4.3, §5.3, §9.1, §9.3: every nullifier's key lifetime now matches the
+  window it guards. A nullifier enforces "at most once" only for as long as its key lives,
+  and the verifier has no other handle on identity — so policy proposals and vouch sessions
+  now expire with the epoch that raised them, and the credential leaf, which has no bound,
+  gains a durable `sk_migrate` committed in the leaf and carried across planned migration.
+  Previously a member could approve a proposal once per epoch, satisfy a vouching threshold
+  alone across rollovers, or spawn one successor credential per epoch — each inheriting the
+  original's tenure, vouch count, and tier (proposal 0005).
 - Specification: the receipt ledger is scoped **per credential**, not per Persora (§2, §10.2,
   §14). The per-Persora reading would have disclosed a member's full cross-agora activity to
   a ledger replay witness (proposal 0002).

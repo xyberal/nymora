@@ -70,6 +70,38 @@ pub struct EpochSecretKey(SecretBytes<32>);
 #[derive(Debug, PartialEq, Eq)]
 pub struct RootOpening(SecretBytes<32>);
 
+/// The durable key behind the migration nullifier, `sk_migrate` (§9.1, §9.3).
+///
+/// A nullifier enforces "at most once" only for the lifetime of the key that produced it,
+/// and the verifier has nothing else to fall back on — it never learns which member acted.
+/// Every other context in the protocol guards something that lives within one epoch and so
+/// uses [`EpochSecretKey`]; a credential's accumulator leaf does not, since it remains in
+/// the accumulator indefinitely. `sk_migrate` is therefore generated once at credential
+/// creation, committed in the leaf, and never rotated.
+///
+/// It carries across planned migration rather than being regenerated. A fresh key would
+/// launder the nullifier consuming the previous leaf, letting one credential spawn
+/// successors without limit — each inheriting the original's tenure, vouch count, and tier
+/// (§9.3).
+///
+/// This is a distinct type from [`EpochSecretKey`] so that the two lifetimes cannot be
+/// confused at a call site: passing the epoch key where this belongs would silently reduce
+/// a permanent guarantee to a per-epoch one.
+#[derive(Debug, PartialEq, Eq)]
+pub struct MigrationKey(SecretBytes<32>);
+
+/// An agora's per-epoch routing tag key, `K_tag_e` (§6.4).
+///
+/// Symmetric, shared by every current member of one agora for one epoch, and distributed
+/// through the same attribute-based-encryption gating used for tiered content. Revocation
+/// is implicit: a revoked member simply stops receiving future broadcasts.
+///
+/// Because it is shared, it authenticates nothing about *who* produced a tag — it only
+/// establishes that the producer held the epoch's key. Never treat a tag match as evidence
+/// of authorship; that is what attestation proofs are for (§6.5).
+#[derive(Debug, PartialEq, Eq)]
+pub struct TagKey(SecretBytes<32>);
+
 macro_rules! secret_newtype {
     ($($name:ident),+ $(,)?) => {
         $(
@@ -90,11 +122,11 @@ macro_rules! secret_newtype {
     };
 }
 
-secret_newtype!(EpochSecretKey, RootOpening);
+secret_newtype!(EpochSecretKey, RootOpening, MigrationKey, TagKey);
 
 #[cfg(test)]
 mod tests {
-    use super::{EpochSecretKey, RootOpening, SecretBytes};
+    use super::{EpochSecretKey, MigrationKey, RootOpening, SecretBytes, TagKey};
     use std::format;
 
     #[test]
@@ -105,12 +137,22 @@ mod tests {
         assert!(!rendered.contains("ab"), "secret leaked into Debug output");
     }
 
+    /// Every named secret, not just the base type.
+    ///
+    /// A newtype that derived `Debug` over a redacting inner type would still redact, but a
+    /// newtype added later over raw bytes would not — so each is checked by name rather
+    /// than trusted to inherit.
     #[test]
     fn named_secrets_do_not_leak_either() {
-        let key = EpochSecretKey::new([0xcd; 32]);
-        let opening = RootOpening::new([0xcd; 32]);
-        assert!(!format!("{key:?}").contains("cd"), "sk_epoch leaked");
-        assert!(!format!("{opening:?}").contains("cd"), "r_root leaked");
+        let rendered = [
+            ("sk_epoch", format!("{:?}", EpochSecretKey::new([0xcd; 32]))),
+            ("r_root", format!("{:?}", RootOpening::new([0xcd; 32]))),
+            ("sk_migrate", format!("{:?}", MigrationKey::new([0xcd; 32]))),
+            ("K_tag_e", format!("{:?}", TagKey::new([0xcd; 32]))),
+        ];
+        for (name, output) in rendered {
+            assert!(!output.contains("cd"), "{name} leaked into Debug output");
+        }
     }
 
     #[test]

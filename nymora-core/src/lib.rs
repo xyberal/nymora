@@ -43,7 +43,7 @@ pub use digest::{
 pub use domain::Domain;
 pub use epoch::Epoch;
 pub use error::{LocalReason, ProtocolError, Rejection};
-pub use secret::{EpochSecretKey, RootOpening, SecretBytes};
+pub use secret::{EpochSecretKey, MigrationKey, RootOpening, SecretBytes, TagKey};
 
 #[cfg(test)]
 extern crate std;

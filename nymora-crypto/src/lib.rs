@@ -23,14 +23,32 @@
 //! in one context can never be reinterpreted as a value produced in another, and so that
 //! two implementations cannot disagree about where one absorbed field ends and the next
 //! begins.
+//!
+//! Until the proving system is chosen, the algebraic family is a documented stand-in behind
+//! the `provisional-algebraic-hash` feature, on by default; see [`algebraic`] for what that
+//! means and what it would cost to ship. Building with `--no-default-features` removes the
+//! stand-in and everything derived through it — [`commit`] and [`nullifier`] — leaving only
+//! the constructions that are settled.
 
 #![no_std]
 
+#[cfg(feature = "provisional-algebraic-hash")]
+pub mod algebraic;
+#[cfg(feature = "provisional-algebraic-hash")]
+pub mod commit;
 pub mod hash;
 pub mod kdf;
+#[cfg(feature = "provisional-algebraic-hash")]
+pub mod nullifier;
+pub mod tag;
 
+#[cfg(feature = "provisional-algebraic-hash")]
+pub use algebraic::{AlgebraicHasher, ProvisionalAlgebraicBackend};
+#[cfg(feature = "provisional-algebraic-hash")]
+pub use commit::commit;
 pub use hash::{ByteHasher, HashBackend, Hasher, Sha256Backend};
 pub use kdf::derive;
+pub use tag::{derive_tag_key, resolve, tag};
 
 #[cfg(test)]
 extern crate std;

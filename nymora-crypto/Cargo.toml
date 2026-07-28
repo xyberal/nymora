@@ -8,9 +8,20 @@ rust-version.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = ["provisional-algebraic-hash"]
+# SHA-256 standing in for the not-yet-chosen algebraic hash, plus the commitments and
+# nullifiers derived through it. On by default so the protocol can be built; disable to
+# check that the stand-in has not reached something it should not have.
+provisional-algebraic-hash = []
+
 [dependencies]
 nymora-core = { path = "../nymora-core" }
 # Byte-hash family (§6.4 requires HMAC, so a conventional hash is permanent, not a
 # placeholder). SHA-256 is hardware-accelerated on the arm64 devices Persora targets.
 sha2 = { version = "0.10", default-features = false }
 hkdf = { version = "0.12", default-features = false }
+# §6.4 specifies routing tags as an HMAC.
+hmac = { version = "0.12", default-features = false }
+# Constant-time comparison and branchless selection for the tag trial loop (§16.4).
+subtle = { version = "2", default-features = false }
