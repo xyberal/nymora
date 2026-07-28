@@ -22,7 +22,20 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   reintroducing it reopens the nullifier decision below — it is not an isolated feature
   (proposal 0006).
 
+### Added
+- Specification §9.1: epoch length is a per-agora policy, default 7 days, bounded to
+  [24 hours, 30 days] (proposal 0007).
+- Specification §9.1, §11: an epoch may be advanced early, and revocation advances it
+  immediately. §11 now states the revocation asymmetry it closes — write capability ends at
+  once, while read capability would otherwise persist until the next tag-key broadcast, which
+  had silently capped the "prompt revocation" §11 relies on (proposal 0007).
+
 ### Fixed
+- Specification §9.1: destroying an epoch key is triggered by the epoch **ending**, not by a
+  successor being certified. Certification happens when a member next acts, so under the
+  previous wording an inactive member never completed a rollover and never deleted — making
+  the forward-secrecy window their activity gap rather than one epoch. A member with no
+  current activity now holds no usable epoch key at all (proposal 0007).
 - Specification §4.3, §5.3, §9.1, §9.3: every nullifier's key lifetime now matches the
   window it guards. A nullifier enforces "at most once" only for as long as its key lives,
   and the verifier has no other handle on identity — so policy proposals and vouch sessions

@@ -351,6 +351,8 @@ for e in recent_epochs_member_has_keys_for:
 
 Revocation of tag access follows automatically from the existing ABE-gating mechanism: a revoked member simply stops receiving future `K_tag_e` broadcasts.
 
+Because tag keys are broadcast per epoch, ceasing to broadcast takes effect at the next epoch boundary rather than immediately. An agora may advance the epoch early precisely to make it immediate; see §11.
+
 ### 6.5 The `attestation_proof` object
 
 A fixed-shape, non-interactive zero-knowledge proof (e.g., Groth16/PLONK), using **one standardized circuit shared across every agora** — deliberately, so that proof size and structure never vary by agora, preventing proof-shape fingerprinting from correlating content back to a specific group.
@@ -564,7 +566,17 @@ epoch_cert = Sign(sk_root, {epoch_number, pk_epoch})
 
 **Epoch keys are generated, never derived.** Each epoch's `sk_epoch` is sampled independently from the device's cryptographically secure random source. It is never computed from `sk_root`, from `r_root`, from a recovery seed, or from the preceding epoch's key — including by a one-way ratchet. `epoch_cert` is what makes a freshly generated key valid; derivation is not a shortcut for that step but a defeat of it. Deriving from long-lived material would let anyone who later obtains that material recompute every past epoch key, and with them every past nullifier, retroactively linking activity that the epoch structure exists to keep separate; deriving from the previous epoch's key would let a single epoch's compromise extend to every epoch after it, silently re-certified by the member's own honest rollover.
 
-The corollary is a deletion requirement: once rollover completes, the previous epoch's key is destroyed. Forward secrecy across epochs rests on that deletion, not on the derivation structure — there is none.
+The corollary is a deletion requirement, and its trigger is the clock rather than the rollover: when an epoch ends, that epoch's key is destroyed, whether or not a successor has been certified. Forward secrecy across epochs rests on that deletion, not on the derivation structure — there is none.
+
+**Certification, by contrast, is triggered by use.** `epoch_cert` never leaves the device (below), so certifying a new epoch key is a purely local operation with no counterparty and nothing published; a member needs a current key only at the moment they act. There is therefore no reason to certify one at the start of every epoch, and good reason not to: a member with no current activity holds no usable epoch key at all, so a seized dormant device yields nothing that can forge a proof and nothing that can recompute even the previous epoch's nullifiers. Members who only read need never certify a key, since resolving tags uses the broadcast `K_tag_e` (§6.4) and verifying content uses the accumulator root.
+
+One consequence is worth stating for implementers: the cost of hardware-backed custody (§9.2) scales with a member's activity, not with elapsed time. A member inactive across ten epochs pays one user-presence prompt when they next act, not ten.
+
+**Epoch length is a per-agora policy, bounded by the protocol.** It is set and adjusted through the same policy-mutation mechanism as vouching thresholds (§5.3), because agoras with different risk profiles should not be handed a single interval — the same judgment §9.3 makes about presuming a device unreachable.
+
+The default is **7 days**, the minimum **24 hours**, and the maximum **30 days**. The bounds are not preferences: below 24 hours, asynchronous k-of-n governance cannot reliably complete inside the epoch that §4.3 and §5.3 confine it to; above 30 days, the forward-secrecy granularity described above stops being useful. Between them the choice follows from how quickly members realistically respond, since a proposal must be both raised and completed within one epoch.
+
+The interval is a **maximum**, not a fixed tick: an epoch may be advanced early (§11), and is not part of the public parameters deriving `agora_id`, which are fixed at creation (§3).
 
 **Nullifier keys are scoped to the window they guard.** A nullifier enforces "at most once" only for the lifetime of the key that produced it, and the verifier has no other handle on identity to fall back on. Vouching (§5.3), policy approval (§4.3), and authorship (§6.1) guard objects that live within a single epoch, and use `sk_epoch` accordingly.
 
@@ -793,6 +805,12 @@ This requires the Skiora to maintain a private internal index from attestation-n
 
 **Scoping, by explicit design decision:** this status check is **internal-only**. It is never included in, or derivable from, anything shared outside the agora. Externally, the group's attestation remains permanent and unconditional — "the group vouched for this at the time" — regardless of later internal governance changes. This mirrors the group-vs-individual reputation scoping in §6.2: the external world receives a coarse, permanent, group-level fact; the internal community receives a finer-grained, evolving, member-level one.
 
+**Revocation is asymmetric in effect, and the asymmetry is closed deliberately.** Write capability ends at once: the credential leaves the accumulator, and no valid proof can be produced against the new root. Read capability would not, since a revoked member already holds the current epoch's `K_tag_e` and the content keys gated alongside it (§6.4), and those are replaced only at an epoch boundary.
+
+Revocation therefore advances the epoch immediately rather than waiting for the schedule (§9.1). The new `K_tag` is broadcast to the remaining members, and the revoked credential receives nothing further. This is what makes the "prompt revocation" named below an available mitigation rather than one capped by the routine epoch interval. It closes future access only: content already resolved cannot be un-resolved, consistent with the absence of any cryptographic undo.
+
+An early advance also expires any open policy proposal or vouch session (§4.3, §5.3). That is intended rather than incidental — the membership set has changed, so the quorum arithmetic has changed, and approvals cast in part by a now-revoked credential should not carry forward silently.
+
 **Consequence, stated plainly:** because external attestation is permanent and cannot be retroactively withdrawn, the group's external credibility is genuinely exposed to anything a member attested to before revocation. There is no cryptographic "undo" once content has propagated externally. The only real mitigations are upstream — careful vetting before admission, and fast internal detection leading to prompt revocation — not anything the protocol can clean up after the fact.
 
 **Why revocation cannot depend on author cooperation:** requiring authors to periodically "refresh" a liveness proof fails precisely in the case that matters — a revoked or compromised author has no incentive to cooperate, and if they could still produce a valid refresh, revocation would be meaningless. The status check must therefore be something the group determines independently of the author's cooperation.
@@ -883,7 +901,7 @@ The lost-device path (§9.3, Path 2) is worse in proportion. Each agora requires
 
 Nothing limits membership count cryptographically, but two costs grow with it:
 
-- **Tag resolution** (§6.4) is proportional to the number of held agoras multiplied by the number of cached epochs per agora, since an incoming tag must be tried against every held key. The work is individually trivial and the growth is linear, but it is not free, and the trial loop must not vary observably in duration according to which key matched.
+- **Tag resolution** (§6.4) is proportional to the number of held agoras multiplied by the number of cached epochs per agora, since an incoming tag must be tried against every held key. The work is individually trivial and the growth is linear, but it is not free, and the trial loop must not vary observably in duration according to which key matched. Early epoch advances (§11) add to the count of cached epochs beyond what the scheduled interval implies; the effect is small, since advances follow membership changes rather than content volume, but a client caching by wall-clock window rather than by epoch count will mis-size its cache.
 - **Hardware credential slots** are finite on discrete authenticators, often a few dozen resident credentials. A member in many agoras may exhaust them.
 
 Persora should make the number of held memberships visible to the member, since the operational cost of each — migration burden, network discipline, recovery exposure — is borne by them and is not otherwise apparent.

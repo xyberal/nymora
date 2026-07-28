@@ -56,8 +56,10 @@ impl<const N: usize> core::fmt::Debug for SecretBytes<N> {
 
 /// A credential's epoch secret key, `sk_epoch` (§9.1).
 ///
-/// Used for every routine operation, and discarded at epoch rollover. Its compromise is
-/// bounded to the epoch it belongs to.
+/// Used for every routine operation. Its compromise is bounded to the epoch it belongs to,
+/// which rests on the key being destroyed when that epoch **ends** — not when a successor is
+/// certified (§9.1). The two are separate events: certification happens when the member next
+/// acts, so a member who is inactive holds no usable epoch key at all.
 #[derive(Debug, PartialEq, Eq)]
 pub struct EpochSecretKey(SecretBytes<32>);
 
