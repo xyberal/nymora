@@ -4,16 +4,19 @@
 //!
 //! These are the interoperable form of the in-module `known_answer` tests: the same values, in a
 //! format a second implementation in another language can consume. See `vectors/README.md` for
-//! what `settled` and `provisional` mean, and for why routing tags are absent.
+//! what `settled` and `provisional` mean.
 //!
 //! The fixture types live here rather than in `nymora-core` behind a feature. Phase 1 expected a
 //! dev-dependency cycle and reserved a home for them; per-crate vectors avoid it, since nothing
 //! outside this file needs to name these shapes.
 
-use nymora_core::{AgoraId, CeremonyMode, Commitment, Domain, Nullifier, PublicParameters};
+use nymora_core::{
+    AgoraId, CeremonyMode, Commitment, Domain, Epoch, MessageHash, Nullifier, PublicParameters,
+    TagKey,
+};
 #[cfg(feature = "provisional-algebraic-hash")]
-use nymora_core::{CredentialKey, EpochSecretKey, MessageHash, RootOpening};
-use nymora_crypto::{agora_id, kdf, policy_class, ByteHasher};
+use nymora_core::{CredentialKey, EpochSecretKey, RootOpening};
+use nymora_crypto::{agora_id, derive_tag_key, kdf, policy_class, tag, ByteHasher};
 #[cfg(feature = "provisional-algebraic-hash")]
 use nymora_crypto::{commit, nullifier};
 use serde::Deserialize;
@@ -138,6 +141,23 @@ fn every_vector_matches() {
                     check(&construction.name, case, derived.as_bytes());
                 }
 
+                "derive_tag_key" => {
+                    let derived = derive_tag_key(
+                        &bytes(case, "agora_secret"),
+                        &AgoraId::from_bytes(array(case, "agora_id")),
+                        Epoch::new(case["epoch"].as_u64().expect("epoch is a number")),
+                    );
+                    check(&construction.name, case, derived.expose());
+                }
+
+                "tag" => {
+                    let routed = tag(
+                        &TagKey::new(array(case, "key")),
+                        &MessageHash::from_bytes(array(case, "message_hash")),
+                    );
+                    check(&construction.name, case, routed.as_bytes());
+                }
+
                 #[cfg(feature = "provisional-algebraic-hash")]
                 "commit" => {
                     let leaf = commit(
@@ -183,7 +203,7 @@ fn every_vector_matches() {
 
     // A harness that silently ran nothing would pass forever. Cheap insurance, and the same
     // failure the secret scan was once found to have.
-    assert!(checked >= 8, "only {checked} settled vectors ran");
+    assert!(checked >= 11, "only {checked} settled vectors ran");
     #[cfg(feature = "provisional-algebraic-hash")]
     assert!(
         checked >= 13,

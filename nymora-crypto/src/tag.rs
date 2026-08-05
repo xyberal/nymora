@@ -36,13 +36,21 @@ pub fn derive_tag_key(agora_secret: &[u8], agora: &AgoraId, epoch: Epoch) -> Tag
 }
 
 /// Computes the routing tag for a message.
+///
+/// # Why the message carries no domain tag
+///
+/// Everything else in this crate absorbs a [`Domain`] before its inputs. This does not, and the
+/// difference is deliberate rather than an omission: HMAC's separation comes from the key, and
+/// `K_tag_e` is already bound to a domain, an agora, and an epoch by
+/// [`derive_tag_key`]. It has exactly one consumer — this function — so a second separation on
+/// the message side would guard against a collision with a use that does not exist.
+///
+/// Should `K_tag_e` ever acquire a second purpose, the answer is a second domain tag in its
+/// derivation, not a prefix on this message. That keeps one rule rather than two.
 #[must_use]
 pub fn tag(key: &TagKey, message: &MessageHash) -> Tag {
-    // The domain tag goes into the HMAC message rather than the key, so this construction
-    // inherits the same separation discipline as the hashes without a second derivation.
     let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(key.expose())
         .expect("HMAC-SHA256 accepts a key of any length");
-    mac.update(Domain::TagRouting.tag().as_bytes());
     mac.update(message.as_bytes());
     Tag::from_bytes(mac.finalize().into_bytes().into())
 }
@@ -161,6 +169,42 @@ mod tests {
         let held = keys(4);
         let target = tag(&held[2], &message(1));
         assert_eq!(resolve(&held, &message(9), &target), None);
+    }
+
+    /// Pins the construction, cross-checked against an independent HMAC-SHA256 implementation.
+    ///
+    /// This construction is settled — a tag never enters a circuit — so a change here is a
+    /// protocol break rather than an expectation to update. It is also the break that hides
+    /// best: a member computing tags differently resolves every bundle to `None`, which is
+    /// indistinguishable from content simply not being addressed to them.
+    #[test]
+    fn known_answer() {
+        assert_eq!(
+            tag(
+                &TagKey::new([0x07; 32]),
+                &MessageHash::from_bytes([0xaa; 32])
+            )
+            .as_bytes(),
+            &[
+                0x6b, 0x05, 0x14, 0x99, 0x00, 0x9e, 0x0f, 0x5d, 0x50, 0x64, 0x48, 0x1b, 0x95, 0x23,
+                0x2e, 0xd8, 0x97, 0x8a, 0xfc, 0x5e, 0x82, 0xff, 0xbf, 0xcf, 0xeb, 0x52, 0xa1, 0x0c,
+                0xd1, 0xb5, 0x0f, 0x1f,
+            ]
+        );
+    }
+
+    /// The key carries the separation, so the derivation and the tag must be pinned together.
+    #[test]
+    fn known_answer_for_a_derived_key() {
+        let key = derive_tag_key(&[0x5a; 32], &AgoraId::from_bytes([0x7e; 32]), Epoch::new(7));
+        assert_eq!(
+            key.expose(),
+            &[
+                0x75, 0xdc, 0x57, 0xd1, 0x1d, 0x4d, 0x1f, 0x04, 0x92, 0xf7, 0x15, 0x1b, 0xb6, 0x5f,
+                0xcd, 0x34, 0x6e, 0x69, 0x86, 0xc6, 0x9d, 0xc8, 0x34, 0x29, 0xa7, 0xc3, 0xf4, 0xac,
+                0xfb, 0xca, 0x60, 0x95,
+            ]
+        );
     }
 
     /// The §16.4 property, tested structurally rather than by timing.

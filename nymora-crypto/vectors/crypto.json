@@ -140,6 +140,39 @@
           "output": "d90b4c72bad39bbf9b12bead93fb2389f8cdce7f7fd3269f7ab195f0cf224b21"
         }
       ]
+    },
+    {
+      "name": "derive_tag_key",
+      "spec": "\u00a76.4",
+      "status": "settled",
+      "cases": [
+        {
+          "name": "epoch-7",
+          "agora_secret": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+          "agora_id": "7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e",
+          "epoch": 7,
+          "output": "75dc57d11d4d1f0492f7151bb65fcd346e6986c69dc83429a7c3f4acfbca6095"
+        }
+      ]
+    },
+    {
+      "name": "tag",
+      "spec": "\u00a76.4",
+      "status": "settled",
+      "cases": [
+        {
+          "name": "fixed-key",
+          "key": "0707070707070707070707070707070707070707070707070707070707070707",
+          "message_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "output": "6b051499009e0f5d5064481b95232ed8978afc5e82ffbfcfeb52a10cd1b50f1f"
+        },
+        {
+          "name": "from-derived-key",
+          "key": "75dc57d11d4d1f0492f7151bb65fcd346e6986c69dc83429a7c3f4acfbca6095",
+          "message_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "output": "4f39c3cf464da5dffb2df68a91bcb2d60b80cbb177c9023802d20f009d6f367f"
+        }
+      ]
     }
   ]
 }

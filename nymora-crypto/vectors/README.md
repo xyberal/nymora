@@ -30,18 +30,14 @@ What a provisional vector pins is the *shape*: the domain tag, the field order, 
 framing, and which value goes where. Those are settled, and getting them wrong is the failure
 these vectors exist to catch. The digest itself is not yet a commitment.
 
-## What is deliberately absent
+## A note on routing tags
 
-**Routing tags (§6.4).** `tag()` and `derive_tag_key()` have no vectors here, and that is not an
-oversight. §6.4 specifies
+`tag` is the one construction here that absorbs no domain tag, and that is deliberate. HMAC
+takes its separation from the key, and `K_tag_e` is already bound to a domain, an agora, and an
+epoch by `derive_tag_key` — which has its own vector, so the two can be checked as a chain.
 
-```
-tag = HMAC(K_tag_e, message_hash)
-```
-
-while the implementation computes `HMAC(K_tag_e, domain_tag || message_hash)`. Both are
-defensible; they are not the same function, and a vector would cement whichever is wrong. This
-is the settled construction with the most to lose from that — a mismatch is silent, since every
-bundle simply resolves to "not addressed to me".
-
-Vectors follow once the specification and the implementation agree.
+These vectors were withheld for a while: the implementation had a domain tag inside the HMAC
+message and §6.4 did not, so publishing either would have cemented the wrong one. A tag mismatch
+is silent — every bundle simply resolves to "not addressed to me" — which is exactly the kind of
+divergence vectors exist to prevent, and exactly the kind that publishing them prematurely would
+have locked in.
