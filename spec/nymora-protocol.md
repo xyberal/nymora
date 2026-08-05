@@ -437,8 +437,10 @@ The mechanism applies uniformly to any live exchange between two or more members
 
 **Step 1 — every participant posts a commitment:**
 ```
-commit_i = Hash(nonce_i, blinding_i)   for each participant i = 1..n
+commit_i = Hash("nymora/v0/live-auth/commitment", nonce_i, blinding_i)   for i = 1..n
 ```
+
+Each field is length-framed before hashing, so the boundary between `nonce_i` and `blinding_i` cannot be moved. Two participants posting an identical commitment is a protocol violation and the session must abort — not because the derivation below depends on it, which it deliberately does not, but because a participant contributing nothing new has no honest reason to.
 
 **Step 2 — once all commitments are visible, everyone reveals:**
 ```
@@ -447,8 +449,18 @@ reveal nonce_i, blinding_i
 
 **Step 3 — the shared context is derived from all contributions together:**
 ```
-context_id = Hash(nonce_1 ⊕ nonce_2 ⊕ ... ⊕ nonce_n, channel_metadata)
+context_id = Hash(
+  "nymora/v0/live-auth/context",
+  n,
+  nonce_(1) ‖ nonce_(2) ‖ … ‖ nonce_(n),    -- ascending lexicographic order,
+                                            -- each length-framed
+  channel_metadata
+)
 ```
+
+**The combination is a hash, not XOR, and that is load-bearing.** XOR is its own inverse, so a participant able to contribute a value equal to another's cancels both — and at n = 2 that yields a context of `Hash(0, channel_metadata)`, known before the session starts. Under a hash the same move produces a duplicated input field and no advantage: the result still depends on a contribution the attacker cannot predict, and forcing a chosen value requires inverting the hash rather than solving an equation. This holds against n−1 colluding participants, not merely against one.
+
+Sorting the nonces makes the input canonical without any participant identifier, which suits a setting where participants are anonymous to each other. The count `n` is absorbed so that a session of one size cannot be reinterpreted as one of another.
 
 **Step 4 — each participant posts one pseudonym and proof against the shared context:**
 ```
@@ -458,7 +470,7 @@ proof_i = ZK(membership ∧ pseudonym_i correctly derived)
 
 **Step 5 — everyone independently verifies every posted proof** against the same `context_id` and the current `Root_tier_K`.
 
-Because `context_id` depends on nonces contributed by *every* participant, and all commit before any reveal, no single party can precompute a pseudonym in advance or bias the final context toward one they've already prepared a replay against. This scales as O(n) — one proof per participant, checked once against a single shared value — rather than the O(n²) exchanges a pairwise-only design would require for every participant to mutually authenticate with every other. At n=2, the mechanism reduces to ordinary two-party mutual authentication with no special-casing required.
+Because `context_id` depends on nonces contributed by *every* participant, all commit before any reveal, and the contributions are combined by a hash rather than a cancellable operation, no coalition short of the whole session can precompute a pseudonym in advance or bias the final context toward one they've already prepared a replay against. This scales as O(n) — one proof per participant, checked once against a single shared value — rather than the O(n²) exchanges a pairwise-only design would require for every participant to mutually authenticate with every other. At n=2, the mechanism reduces to ordinary two-party mutual authentication with no special-casing required.
 
 **channel_metadata** should ideally incorporate something from the underlying secure channel's own key exchange (e.g., a hash of the session's ephemeral Diffie-Hellman output), so that the resulting `context_id` inherits whatever anti-relay guarantee that channel's handshake already provides. The pseudonym scheme is only as strong as the channel it's bound to — it does not independently defend against a person-in-the-middle relaying two separate sessions unless the underlying channel already resists that.
 
@@ -484,7 +496,7 @@ sequenceDiagram
     Charlie->>Alice: reveal nonce_charlie, blinding_charlie
     Charlie->>Bob: reveal nonce_charlie, blinding_charlie
 
-    Note over Alice,Charlie: context_id = Hash(nonce_alice ⊕ nonce_bob ⊕ nonce_charlie, channel_metadata)<br/>— computed independently, identically, by all three
+    Note over Alice,Charlie: context_id = Hash(sorted framed nonces, channel_metadata)<br/>— computed independently, identically, by all three
 
     Alice->>Alice: pseudonym_alice, proof_alice = derive(sk_alice, context_id)
     Bob->>Bob: pseudonym_bob, proof_bob = derive(sk_bob, context_id)

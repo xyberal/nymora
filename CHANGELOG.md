@@ -47,6 +47,15 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   had silently capped the "prompt revocation" §11 relies on (proposal 0007).
 
 ### Fixed
+- Specification §8.1: the jointly-derived session context is combined with a **hash over
+  length-framed, canonically ordered contributions**, not XOR. XOR is its own inverse and
+  nothing required commitments to be distinct, so a participant could copy another's
+  commitment, replay its opening, and cancel that contribution — at n = 2 yielding a
+  `context_id` of `Hash(0, channel_metadata)`, fully determined before the session began. That
+  is exactly the precomputation the section claimed to prevent. The claim now holds against any
+  coalition short of the whole session rather than against a single party, and §10.4's
+  verifiably-random witness selection, which cites this primitive as unbiasable randomness,
+  inherits the repair (proposal 0012).
 - Specification §9.1: completed proposal 0008's application, which had left four claims
   standing that its own decision invalidated. The routine-proof statement still said vouching
   used `sk_epoch` and still carried authorship's nullifier formula, two paragraphs after the

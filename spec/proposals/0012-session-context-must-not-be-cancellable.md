@@ -1,9 +1,14 @@
 # Proposal 0012 — The live-auth session context must not be combinable by XOR
 
-**Status:** **Proposed**
+**Status:** **Applied** — the sections below are now normative in the specification
 **Affects:** §8.1
 **Supersedes:** nothing
 **Corrects:** §8.1's claim that no single party can bias the derived context
+
+> **Applied as drafted.** The strengthened claim replaced the original rather than sitting
+> alongside it: the old sentence bounded the guarantee to a *single* party, and the construction
+> now holds against any coalition short of the whole session, so leaving both would have
+> understated it.
 
 ---
 
