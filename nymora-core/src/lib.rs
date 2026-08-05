@@ -30,6 +30,7 @@
 #![no_std]
 
 mod agora;
+mod bundle;
 mod digest;
 mod domain;
 mod epoch;
@@ -37,6 +38,7 @@ mod error;
 mod secret;
 
 pub use agora::{AgoraId, CeremonyMode, PublicParameters};
+pub use bundle::{Attestation, Bundle, FORMAT_VERSION};
 pub use digest::{
     Commitment, LedgerHash, MessageHash, Nullifier, Root, SessionPseudonym, Tag, DIGEST_LEN,
 };
