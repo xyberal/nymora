@@ -8,6 +8,16 @@ rust-version.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = ["provisional-algebraic-hash"]
+# Accumulator nodes are recomputed inside the circuit, so they belong to the algebraic hash
+# family (§6.5) — which is not yet chosen. Without the stand-in there is no hash to build a
+# tree from, so `--no-default-features` leaves this crate empty rather than partly working.
+provisional-algebraic-hash = ["nymora-crypto/provisional-algebraic-hash"]
+
 [dependencies]
 nymora-core = { path = "../nymora-core" }
-nymora-crypto = { path = "../nymora-crypto" }
+nymora-crypto = { path = "../nymora-crypto", default-features = false }
+# Branchless selection: which child a node is depends on a bit of the member's index, and the
+# index is their position in the membership set (§5.2).
+subtle = { version = "2", default-features = false }
