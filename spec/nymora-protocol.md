@@ -552,11 +552,13 @@ sk_epoch  — freshly generated each epoch and certified by sk_root; used for ro
             day-to-day operations
 ```
 
-The accumulator leaf commits to `pk_root` (a public verification key derived from `sk_root`) and to `sk_cred` (below), using an opening value `r_root` fixed once at credential creation:
+The accumulator leaf commits to `pk_root` (a public verification key derived from `sk_root`) and to `sk_cred` (below), using an opening value `r_root` fixed once at credential creation, and is bound to the agora it belongs to:
 
 ```
-leaf = Commit(pk_root, sk_cred, r_root)
+leaf = Commit(pk_root, sk_cred, r_root, agora_id)
 ```
+
+The `agora_id` is not secret to the parties who hold this leaf and adds no hiding. It is present so that §5.1's requirement — that no commitment derived within one agora be derivable from another — holds by construction rather than by a client having correctly generated fresh material per agora. Both are required; only one of them survives a key-generation bug.
 
 `sk_root`'s only routine job is to **certify a new epoch key** when one is generated:
 
@@ -611,7 +613,7 @@ Attribution is bounded with it, with one exception. `sk_cred` is durable by nece
 
 **What this does not bound:** compromise of `sk_root` itself. Since `sk_root` can sign arbitrary future epoch certificates and is the credential authorized to participate in root-level governance actions (quorum votes, re-keying, dissolution — §5.3, §12), its compromise is effectively total and permanent for that credential, which is precisely why `sk_root` deserves the heavier protection described next, rather than living alongside `sk_epoch` in the same routinely-used storage.
 
-**`r_root` is a blinding value, not authority, and is held in software.** Every proof of root-leaf membership must open `Commit(pk_root, sk_cred, r_root)`, which requires `r_root` itself as a witness. No per-epoch substitute is possible: any derivation one-way enough to protect `r_root` is, by construction, unable to open a commitment formed with it. `r_root` is therefore supplied on every routine proof, and cannot meaningfully be held in hardware custody — a value exported on every operation is not hardware-held in any useful sense.
+**`r_root` is a blinding value, not authority, and is held in software.** Every proof of root-leaf membership must open `Commit(pk_root, sk_cred, r_root, agora_id)`, which requires `r_root` itself as a witness. No per-epoch substitute is possible: any derivation one-way enough to protect `r_root` is, by construction, unable to open a commitment formed with it. `r_root` is therefore supplied on every routine proof, and cannot meaningfully be held in hardware custody — a value exported on every operation is not hardware-held in any useful sense.
 
 This is acceptable because `r_root` authorizes nothing. Its sole function is to hide `pk_root` from Skiora, which receives only the commitment at credential creation. An adversary holding `r_root` alone can forge no proof, sign no certificate, and impersonate no one; the value becomes useful only in combination with a candidate `pk_root`, and an adversary positioned to obtain both already holds the device. `r_root` is stored with `sk_epoch` in ordinary OS-protected storage, and is not rotated.
 

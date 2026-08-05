@@ -54,6 +54,31 @@ domains! {
     /// to a Skiora and §5.1 forbids such a handle being derivable across agoras.
     PolicyClass => "nymora/v0/policy-class",
 
+    /// Hashing a value into an accumulator leaf (§5.2).
+    ///
+    /// Distinct from [`Domain::AccumulatorNode`], and the distinction is the point. Without
+    /// it, a fixed-depth tree admits the standard Merkle second-preimage substitution: an
+    /// interior node, which is itself a hash of two children, is presented as a leaf, and an
+    /// inclusion proof for it verifies. Two tags make the two positions unforgeable for each
+    /// other.
+    ///
+    /// The accumulator hashes whatever value it is given rather than relying on that value
+    /// already being domain-separated. A credential leaf is a [`Domain::Commitment`] and would
+    /// be safe on its own, but the accumulator is generic over what it holds — §11's
+    /// revocation set is a second instance — and its safety must not depend on the provenance
+    /// of its contents.
+    AccumulatorLeaf => "nymora/v0/accumulator/leaf",
+
+    /// Hashing two children into an interior accumulator node (§5.2).
+    AccumulatorNode => "nymora/v0/accumulator/node",
+
+    /// The one-time certificate authorizing migration to new hardware (§9.3).
+    ///
+    /// Distinct from [`Domain::EpochCertificate`]: both are signed by `sk_root`, and a
+    /// migration certificate accepted as an epoch certificate — or the reverse — would let one
+    /// authorization stand in for the other.
+    MigrationCertificate => "nymora/v0/migration-cert",
+
     /// The payload an epoch certificate signs over (§9.1).
     EpochCertificate => "nymora/v0/epoch-cert",
 
