@@ -223,6 +223,14 @@ GET /agora/{agora_id}/accumulator/{policy_class}/root   [member-gated — see §
 
 **No API surface exposes accumulator size, leaf count, or leaf listing, at any point.** Only the root hash is public (or member-visible, per §7); a fixed-depth tree's root reveals nothing about occupancy on its own.
 
+**Accumulators are append-only.** A leaf is added when a credential is admitted and is never removed or modified. Nothing in the protocol withdraws one: planned migration (§9.3) consumes the old leaf by spending its migration nullifier rather than deleting it, revocation (§11) maintains a separate revocation-set root, and dissolution (§12) freezes roots rather than emptying them.
+
+Two consequences follow, and both are easy to get wrong in the opposite direction.
+
+First, **presence in the accumulator does not by itself mean a credential is current.** A credential is current when its leaf is present, its migration nullifier is unspent (§9.3), and it is absent from the revocation set (§11). A verifier checking only inclusion accepts superseded and revoked credentials.
+
+Second, **depth must be sized for every credential the agora will ever issue**, not for its live membership. Migrated predecessors and revoked members consume capacity permanently, and since planned migration is the expected path for a routine device change, consumption tracks device churn rather than recruitment.
+
 ### 5.3 Vouching protocol
 
 Admission of a new candidate requires k-of-n independent zero-knowledge attestations from existing eligible members:

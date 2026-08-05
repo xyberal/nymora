@@ -10,8 +10,8 @@
 //! holds the whole tree.
 //!
 //! Path verification is what every role performs and what a circuit will later recompute, so it
-//! is the crate's core and allocates nothing. Tree construction is a separate, larger concern
-//! and is not here yet.
+//! is the crate's core and allocates nothing. Tree construction lives behind the `build`
+//! feature, off by default, and is the only part that needs an allocator.
 //!
 //! # Nothing reports how full it is
 //!
@@ -33,9 +33,13 @@
 
 #![no_std]
 
+#[cfg(feature = "build")]
+pub mod tree;
 #[cfg(feature = "provisional-algebraic-hash")]
 pub mod witness;
 
+#[cfg(feature = "build")]
+pub use tree::Tree;
 #[cfg(feature = "provisional-algebraic-hash")]
 pub use witness::{hash_leaf, hash_node, root_from, verifies, Node, Witness};
 

@@ -17,12 +17,23 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   requirement in §5.1 (proposal 0002).
 
 ### Changed
+- Specification §9.1: the credential leaf commits to its agora —
+  `Commit(pk_root, sk_cred, r_root, agora_id)`. §5.1 already listed commitments among the
+  values that may not be derivable across agoras, and the construction did not comply; the
+  property held only because §5.1 separately requires fresh key material per agora, which is
+  a client behaving correctly rather than a construction making it so (proposal 0013).
 - Corroboration (§6.3) is **deferred** to a later protocol version; the external bundle
   (§6.6) carries no `corroborations` array. The section remains specified, with a note that
   reintroducing it reopens the nullifier decision below — it is not an isolated feature
   (proposal 0006).
 
 ### Added
+- Specification §5.2: accumulators are **append-only** — no mechanism withdraws a leaf, since
+  migration consumes one by nullifier (§9.3), revocation keeps a separate set (§11), and
+  dissolution freezes rather than empties (§12). Two consequences are now stated: presence in
+  the accumulator does not by itself mean a credential is current, and depth must be sized for
+  every credential an agora will ever issue rather than for its live membership, since
+  consumption tracks device churn (proposal 0014).
 - Specification §9.1: an epoch ends at whichever comes first — the transparency log
   publishing an advance, or the maximum interval elapsing on the local clock. Failing toward
   the earlier signal is deliberate, since a key recognised as expired late outlives its
