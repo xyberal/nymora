@@ -24,3 +24,8 @@ nymora-crypto = { path = "../nymora-crypto", default-features = false }
 # Branchless selection: which child a node is depends on a bit of the member's index, and the
 # index is their position in the membership set (§5.2).
 subtle = { version = "2", default-features = false }
+
+[dev-dependencies]
+# Conformance vectors are JSON, for a second implementation in another language to consume.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

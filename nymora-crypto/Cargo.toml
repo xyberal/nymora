@@ -25,3 +25,9 @@ hkdf = { version = "0.12", default-features = false }
 hmac = { version = "0.12", default-features = false }
 # Constant-time comparison and branchless selection for the tag trial loop (§16.4).
 subtle = { version = "2", default-features = false }
+
+[dev-dependencies]
+# Conformance vectors are JSON so a second implementation in another language can consume them.
+# Dev-only: the library itself stays `no_std` with no serialization dependency.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
