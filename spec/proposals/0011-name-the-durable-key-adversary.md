@@ -1,8 +1,17 @@
 # Proposal 0011 — Name the durable-key adversary
 
-**Status:** **Proposed**
+**Status:** **Applied** — the sections below are now normative in the specification
 **Affects:** §1, §15
 **Supersedes:** nothing
+
+> **Applied as drafted.** The §15 entry sits between the hardware-custody and migration entries
+> rather than at the end of the list: it is the boundary of the first, and the reason the second
+> is not a complete remedy.
+>
+> One §9.1 claim this would otherwise have had to correct — that a seized dormant device yields
+> nothing able to recompute past nullifiers — was fixed earlier, as part of completing proposal
+> 0008's application. That is where it belonged: the sentence became false when 0008 made three
+> nullifier contexts durable, not when this proposal named the adversary that exploits them.
 
 ---
 

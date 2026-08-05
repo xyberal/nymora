@@ -28,6 +28,16 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (proposal 0006).
 
 ### Added
+- Threat model §1, §15: an adversary who **retains extracted key material** after losing access
+  to the device is now enumerated. §1 listed device seizure but said nothing about what survives
+  it, and two of a credential's three secrets cannot be hardware-held at all — a value the
+  circuit recomputes must be supplied to it as a witness — so §9.2's protection covers `sk_root`
+  and not `r_root` or `sk_cred`. The §15 entry states what such an adversary reaches
+  (recomputing any vouching, policy, or migration nullifier, in either direction, for the life
+  of the credential), what bounds it (those nullifiers are unpublished, `sk_cred` is per-agora,
+  and content is epoch-keyed), and that escaping it costs a Path 2 revocation — the full
+  lost-device penalty without a lost device. Three prior proposals rediscovered this from the
+  consequence end (proposal 0011).
 - Specification §5.2: accumulators are **append-only** — no mechanism withdraws a leaf, since
   migration consumes one by nullifier (§9.3), revocation keeps a separate set (§11), and
   dissolution freezes rather than empties (§12). Two consequences are now stated: presence in
