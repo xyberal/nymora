@@ -24,7 +24,7 @@
 //! has no hash and takes no cryptographic dependency. It is stated here because the port is
 //! where a host implementer will look.
 
-use nymora_core::{AgoraId, Epoch, ProtocolError};
+use nymora_core::{AgoraId, Epoch, PolicyClass, ProtocolError};
 
 /// What a stored value is.
 ///
@@ -40,9 +40,9 @@ use nymora_core::{AgoraId, Epoch, ProtocolError};
 /// change — this enum is `#[non_exhaustive]` — whereas shipping a slot that turns out to hold
 /// nothing would be a durability contract made on a guess.
 ///
-/// **Cached accumulator roots (§8.3).** Roots are scoped per tier as well as per epoch (§5.2),
-/// and tiers are not yet modelled in this workspace. A slot keyed only by [`Epoch`] would be
-/// quietly wrong for a multi-tier agora.
+/// Cached accumulator roots were absent for the same reason until [`PolicyClass`] existed:
+/// roots are scoped per class as well as per epoch (§5.2), and a slot keyed only by [`Epoch`]
+/// would have been quietly wrong for any agora running more than one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Slot {
@@ -70,6 +70,21 @@ pub enum Slot {
     /// Several may be live at once: §11's revocation asymmetry means read capability persists
     /// until the next tag-key broadcast, even where write capability has already ended.
     TagKey(Epoch),
+
+    /// An accumulator root, cached for offline verification (§8.3).
+    ///
+    /// Keyed by policy class as well as epoch, since §5.2 gives each class its own tree.
+    ///
+    /// This is the slot where the module's integrity note bites hardest: a root is public
+    /// (§5.2), so nothing here is secret — but in-person authentication verifies against the
+    /// cached copy with no network to correct it (§8.3), so a tampered root makes a revoked
+    /// credential verify. Confidentiality is not the property this slot needs; authenticity is.
+    CachedRoot {
+        /// Which of the agora's membership partitions the root belongs to.
+        policy_class: PolicyClass,
+        /// The epoch the root was published for.
+        epoch: Epoch,
+    },
 }
 
 /// Durable storage for one member's material, scoped per agora.
@@ -136,7 +151,7 @@ pub trait SecureStorage {
 #[cfg(test)]
 mod tests {
     use super::{SecureStorage, Slot};
-    use nymora_core::{AgoraId, Epoch, ProtocolError};
+    use nymora_core::{AgoraId, Epoch, PolicyClass, ProtocolError};
 
     /// A host may hold this port behind a trait object; keep it dyn-compatible.
     fn _is_dyn_compatible(_: &dyn SecureStorage) {}
@@ -186,6 +201,32 @@ mod tests {
             assert_ne!(Slot::CredentialKey, Slot::EpochKey(Epoch::new(epoch)));
             assert_ne!(Slot::RootOpening, Slot::TagKey(Epoch::new(epoch)));
         }
+    }
+
+    /// A cached root is keyed by both class and epoch, and neither alone suffices.
+    ///
+    /// Collapsing either would make an agora with two policy classes overwrite one class's root
+    /// with another's — and §8.3 verifies against the cached copy with no network to correct it,
+    /// so the error surfaces as a valid credential failing, or a revoked one passing.
+    #[test]
+    fn a_cached_root_is_scoped_to_both_class_and_epoch() {
+        let members = PolicyClass::from_bytes([0x01; 32]);
+        let vouchers = PolicyClass::from_bytes([0x02; 32]);
+        let at = |policy_class, epoch| Slot::CachedRoot {
+            policy_class,
+            epoch: Epoch::new(epoch),
+        };
+
+        assert_ne!(
+            at(members, 7),
+            at(vouchers, 7),
+            "the class is not part of the key"
+        );
+        assert_ne!(
+            at(members, 7),
+            at(members, 8),
+            "the epoch is not part of the key"
+        );
     }
 
     /// Deletion is idempotent, so a late or repeated epoch-end sweep is safe.

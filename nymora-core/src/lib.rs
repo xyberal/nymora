@@ -35,6 +35,7 @@ mod digest;
 mod domain;
 mod epoch;
 mod error;
+mod policy;
 mod secret;
 
 pub use agora::{AgoraId, CeremonyMode, PublicParameters};
@@ -45,6 +46,7 @@ pub use digest::{
 pub use domain::Domain;
 pub use epoch::Epoch;
 pub use error::{LocalReason, ProtocolError, Rejection};
+pub use policy::PolicyClass;
 pub use secret::{CredentialKey, EpochSecretKey, RootOpening, SecretBytes, TagKey};
 
 #[cfg(test)]

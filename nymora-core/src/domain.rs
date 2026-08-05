@@ -48,6 +48,12 @@ domains! {
     /// The accumulator leaf commitment, `Commit(pk_root, sk_cred, r_root)` (§9.1).
     Commitment => "nymora/v0/commitment",
 
+    /// Derivation of a policy class identifier from its agora and label (§5.2).
+    ///
+    /// Per-agora rather than a shared constant, because the identifier is a handle presented
+    /// to a Skiora and §5.1 forbids such a handle being derivable across agoras.
+    PolicyClass => "nymora/v0/policy-class",
+
     /// The payload an epoch certificate signs over (§9.1).
     EpochCertificate => "nymora/v0/epoch-cert",
 
