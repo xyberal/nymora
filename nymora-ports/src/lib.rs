@@ -34,15 +34,26 @@
 //!   certificate is replayable into another agora the member belongs to (§16.1).
 //! - **An `agora_id` must not become a visible storage label** ([`storage`]), or the store
 //!   discloses the existence of agoras that §3 keeps confidential.
+//!
+//! # The reference backend
+//!
+//! [`software`] provides a `KeyStore` for development and tests, behind the default-off
+//! `software-key-store` feature. It is not production custody and reports no capability at all,
+//! so a caller written against it handles the weakest backend from the first day rather than
+//! discovering the variance when hardware arrives.
 
 #![no_std]
 
 pub mod key_store;
+#[cfg(feature = "software-key-store")]
+pub mod software;
 pub mod storage;
 
 pub use key_store::{
     Capabilities, EpochCertPayload, KeyStore, RootMaterialOut, RootMaterialWritten,
 };
+#[cfg(feature = "software-key-store")]
+pub use software::SoftwareKeyStore;
 pub use storage::{SecureStorage, Slot};
 
 #[cfg(test)]
