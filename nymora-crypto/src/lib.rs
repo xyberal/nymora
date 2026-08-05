@@ -32,6 +32,7 @@
 
 #![no_std]
 
+pub mod agora_id;
 #[cfg(feature = "provisional-algebraic-hash")]
 pub mod algebraic;
 #[cfg(feature = "provisional-algebraic-hash")]
@@ -47,8 +48,12 @@ pub use algebraic::{AlgebraicHasher, ProvisionalAlgebraicBackend};
 #[cfg(feature = "provisional-algebraic-hash")]
 pub use commit::commit;
 pub use hash::{ByteHasher, HashBackend, Hasher, Sha256Backend};
-pub use kdf::derive;
 pub use tag::{derive_tag_key, resolve, tag};
+
+// `kdf::derive` and `agora_id::derive` are deliberately not re-exported here. Two functions
+// named `derive` at the crate root would be ambiguous at a glance in exactly the place
+// ambiguity is most expensive — one produces key material, the other a permanent public
+// identifier. Reach them through their modules.
 
 #[cfg(test)]
 extern crate std;

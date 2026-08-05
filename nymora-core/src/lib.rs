@@ -36,7 +36,7 @@ mod epoch;
 mod error;
 mod secret;
 
-pub use agora::AgoraId;
+pub use agora::{AgoraId, CeremonyMode, PublicParameters};
 pub use digest::{
     Commitment, LedgerHash, MessageHash, Nullifier, Root, SessionPseudonym, Tag, DIGEST_LEN,
 };
