@@ -72,25 +72,32 @@ pub struct EpochSecretKey(SecretBytes<32>);
 #[derive(Debug, PartialEq, Eq)]
 pub struct RootOpening(SecretBytes<32>);
 
-/// The durable key behind the migration nullifier, `sk_migrate` (§9.1, §9.3).
+/// A credential's durable secret, `sk_cred` (§9.1).
 ///
-/// A nullifier enforces "at most once" only for the lifetime of the key that produced it,
-/// and the verifier has nothing else to fall back on — it never learns which member acted.
-/// Every other context in the protocol guards something that lives within one epoch and so
-/// uses [`EpochSecretKey`]; a credential's accumulator leaf does not, since it remains in
-/// the accumulator indefinitely. `sk_migrate` is therefore generated once at credential
-/// creation, committed in the leaf, and never rotated.
+/// Every nullifier whose *count* must be correct derives from this: vouching attestations
+/// (§5.3), policy approvals (§4.3), and the migration nullifier consuming a leaf (§9.3).
+/// Generated once at credential creation, independently per agora (§5.1), committed in the
+/// leaf, and never rotated.
+///
+/// It cannot be [`EpochSecretKey`], and the reason is not the epoch's length. Certification
+/// is purely local, so a member can generate and certify a *second* `sk_epoch` for the same
+/// epoch number whenever they like, and the verifier cannot tell — `pk_epoch` is a private
+/// witness, and publishing it to expose duplicates would reintroduce the same-epoch
+/// linkability keeping it private prevents. Two keys in one epoch means two nullifiers for
+/// one action, so any count resting on the epoch key can be inflated at will. Enforcing
+/// one-key-per-epoch client-side is no help: the member who would exploit it owns the
+/// device.
 ///
 /// It carries across planned migration rather than being regenerated. A fresh key would
 /// launder the nullifier consuming the previous leaf, letting one credential spawn
 /// successors without limit — each inheriting the original's tenure, vouch count, and tier
 /// (§9.3).
 ///
-/// This is a distinct type from [`EpochSecretKey`] so that the two lifetimes cannot be
-/// confused at a call site: passing the epoch key where this belongs would silently reduce
-/// a permanent guarantee to a per-epoch one.
+/// Authorship (§6.1) deliberately does *not* use this. Its objects are public, so a durable
+/// key there would let an adversary holding it recompute nullifiers over every published
+/// bundle and attribute a member's content retroactively.
 #[derive(Debug, PartialEq, Eq)]
-pub struct MigrationKey(SecretBytes<32>);
+pub struct CredentialKey(SecretBytes<32>);
 
 /// An agora's per-epoch routing tag key, `K_tag_e` (§6.4).
 ///
@@ -124,11 +131,11 @@ macro_rules! secret_newtype {
     };
 }
 
-secret_newtype!(EpochSecretKey, RootOpening, MigrationKey, TagKey);
+secret_newtype!(EpochSecretKey, RootOpening, CredentialKey, TagKey);
 
 #[cfg(test)]
 mod tests {
-    use super::{EpochSecretKey, MigrationKey, RootOpening, SecretBytes, TagKey};
+    use super::{CredentialKey, EpochSecretKey, RootOpening, SecretBytes, TagKey};
     use std::format;
 
     #[test]
@@ -149,7 +156,7 @@ mod tests {
         let rendered = [
             ("sk_epoch", format!("{:?}", EpochSecretKey::new([0xcd; 32]))),
             ("r_root", format!("{:?}", RootOpening::new([0xcd; 32]))),
-            ("sk_migrate", format!("{:?}", MigrationKey::new([0xcd; 32]))),
+            ("sk_cred", format!("{:?}", CredentialKey::new([0xcd; 32]))),
             ("K_tag_e", format!("{:?}", TagKey::new([0xcd; 32]))),
         ];
         for (name, output) in rendered {

@@ -3,7 +3,7 @@
 //! The credential leaf commitment (§9.1).
 //!
 //! ```text
-//! leaf = Commit(pk_root, sk_migrate, r_root)
+//! leaf = Commit(pk_root, sk_cred, r_root)
 //! ```
 //!
 //! This is what Skiora holds in place of a member's public key. It is **hiding** — Skiora
@@ -11,25 +11,25 @@
 //! claim a different pair produced the same leaf. Every routine proof opens it (§9.1), which
 //! is why `r_root` is supplied on every operation and cannot be held in hardware.
 //!
-//! Committing to `sk_migrate` is what makes its durability enforceable rather than merely
-//! requested: the migration proof shows the nullifier derives from the same key this leaf
+//! Committing to `sk_cred` is what makes its durability enforceable rather than merely
+//! requested: every proof using it shows the nullifier derives from the same key this leaf
 //! commits to, so a member who invents a fresh one has no leaf containing it (§9.3).
 
 use crate::algebraic::AlgebraicHasher;
-use nymora_core::{Commitment, Domain, MigrationKey, RootOpening};
+use nymora_core::{Commitment, CredentialKey, Domain, RootOpening};
 
-/// Commits to a credential's root public key and migration key under an opening value.
+/// Commits to a credential's root public key and durable secret under an opening value.
 ///
 /// Hiding rests entirely on `opening` being unpredictable: this is a hash commitment, so an
 /// adversary who can guess the opening can confirm a guessed `pk_root` by recomputation.
 /// `r_root` must therefore come from a cryptographically secure random source at credential
 /// creation, and never from anything derived, counted, or reused (§5.1).
 #[must_use]
-pub fn commit(pk_root: &[u8], migration_key: &MigrationKey, opening: &RootOpening) -> Commitment {
+pub fn commit(pk_root: &[u8], credential_key: &CredentialKey, opening: &RootOpening) -> Commitment {
     Commitment::from_bytes(
         AlgebraicHasher::new(Domain::Commitment)
             .absorb(pk_root)
-            .absorb(migration_key.expose())
+            .absorb(credential_key.expose())
             .absorb(opening.expose())
             .finalize(),
     )
@@ -38,12 +38,12 @@ pub fn commit(pk_root: &[u8], migration_key: &MigrationKey, opening: &RootOpenin
 #[cfg(test)]
 mod tests {
     use super::commit;
-    use nymora_core::{MigrationKey, RootOpening};
+    use nymora_core::{CredentialKey, RootOpening};
 
     const PK: &[u8] = &[0x11; 32];
 
-    fn mk(byte: u8) -> MigrationKey {
-        MigrationKey::new([byte; 32])
+    fn mk(byte: u8) -> CredentialKey {
+        CredentialKey::new([byte; 32])
     }
 
     fn opening(byte: u8) -> RootOpening {
@@ -79,12 +79,12 @@ mod tests {
         );
     }
 
-    /// The migration key is bound too, not just carried alongside.
+    /// The credential key is bound too, not just carried alongside.
     ///
-    /// This is what stops a member from presenting a leaf with one `sk_migrate` and a
-    /// migration nullifier derived from another (§9.3).
+    /// This is what stops a member from presenting a leaf with one `sk_cred` and a
+    /// nullifier derived from another (§5.3, §4.3, §9.3).
     #[test]
-    fn the_migration_key_changes_the_leaf() {
+    fn the_credential_key_changes_the_leaf() {
         assert_ne!(
             commit(PK, &mk(0x44), &opening(0x22)),
             commit(PK, &mk(0x45), &opening(0x22))

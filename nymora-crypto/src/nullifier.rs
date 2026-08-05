@@ -7,23 +7,33 @@
 //! deterministic, the same member acting twice in the same context produces the same value,
 //! and because it is a hash of a secret, nobody can tell which member that is.
 //!
-//! # Uniqueness lasts exactly as long as the key
+//! # Anything counted takes the durable key
 //!
 //! The window over which "once" is enforced is the lifetime of the key that produced the
 //! nullifier — derive the same context under a fresh key and the result is an unrelated
-//! value the verifier cannot recognise as a repeat. So each function takes the key whose
-//! lifetime matches the object it guards (§9.1):
+//! value the verifier cannot recognise as a repeat. Three of the four functions here exist
+//! so that something can be *counted*, so all three take [`CredentialKey`] (§9.1):
 //!
-//! - [`vouch`], [`attestation`], and [`policy`] guard objects bounded to one epoch — a
-//!   vouch session must finalize within its epoch (§5.3) and a policy proposal expires at
-//!   the end of its own (§4.3) — so they take [`EpochSecretKey`].
-//! - [`migration`] guards an accumulator leaf, which has no bound at all, so it takes the
-//!   durable [`MigrationKey`].
+//! | | Key | What the count protects |
+//! |---|---|---|
+//! | [`vouch`] | [`CredentialKey`] | A k-of-n admission threshold (§5.3) |
+//! | [`policy`] | [`CredentialKey`] | One approval per credential (§4.3) |
+//! | [`migration`] | [`CredentialKey`] | One successor per credential (§9.3) |
+//! | [`attestation`] | [`EpochSecretKey`] | Nothing load-bearing — see below |
 //!
-//! The two are distinct types rather than one, because substituting the epoch key into
-//! `migration` would silently turn a permanent guarantee into a per-epoch one — and the
-//! failure would not appear until a rollover, in production, as a member spawning a second
-//! credential from the same leaf.
+//! The epoch key cannot serve a count, and not because epochs are short. Certifying an
+//! epoch key is purely local (§9.1), so a member can certify a *second* one for the same
+//! epoch whenever they like and produce two nullifiers for one action. The verifier cannot
+//! detect it: `pk_epoch` is a private witness, and publishing it to expose duplicates would
+//! reintroduce the same-epoch linkability keeping it private prevents. Enforcing
+//! one-key-per-epoch in the client is worthless, since the member who would exploit it owns
+//! the device.
+//!
+//! [`attestation`] keeps the epoch key deliberately. It is the one context whose objects are
+//! public, so a durable key would let anyone holding it sweep every published bundle and
+//! attribute a member's content retroactively — and its uniqueness is the least load-bearing,
+//! since the replay §6.1 cites it for is already prevented by the proof's binding to
+//! `message_hash`.
 //!
 //! # Agora scoping
 //!
@@ -32,7 +42,7 @@
 //! into another (§5.1, §6.1).
 
 use crate::algebraic::AlgebraicHasher;
-use nymora_core::{AgoraId, Domain, EpochSecretKey, MessageHash, MigrationKey, Nullifier};
+use nymora_core::{AgoraId, CredentialKey, Domain, EpochSecretKey, MessageHash, Nullifier};
 
 /// Scopes one vouching attestation to one admission session (§5.3).
 ///
@@ -43,7 +53,7 @@ use nymora_core::{AgoraId, Domain, EpochSecretKey, MessageHash, MigrationKey, Nu
 /// This nullifier is not agora-scoped: a session identifier is already unique to the agora
 /// that issued it, and absorbing the `agora_id` alongside it would add nothing.
 #[must_use]
-pub fn vouch(key: &EpochSecretKey, session_id: &[u8]) -> Nullifier {
+pub fn vouch(key: &CredentialKey, session_id: &[u8]) -> Nullifier {
     Nullifier::from_bytes(
         AlgebraicHasher::new(Domain::NullifierVouch)
             .absorb(key.expose())
@@ -73,12 +83,12 @@ pub fn attestation(key: &EpochSecretKey, message: &MessageHash, agora: &AgoraId)
 
 /// Enforces one approval per credential on a policy proposal (§4.3).
 ///
-/// `proposal_id` is the identifier under which approvals accumulate. This is sound only
-/// because a proposal expires at the end of the epoch in which it was raised (§4.3): a
-/// longer-lived proposal would outlast the key counting its approvals, and the same
-/// credential could approve it again under the next epoch's key.
+/// `proposal_id` is the identifier under which approvals accumulate. Proposals still expire
+/// with the epoch that raised them, but for quorum freshness rather than for anything to do
+/// with this nullifier: a proposal outliving its membership set would accumulate approvals
+/// against a threshold that no longer describes the group (§4.3).
 #[must_use]
-pub fn policy(key: &EpochSecretKey, proposal_id: &[u8], agora: &AgoraId) -> Nullifier {
+pub fn policy(key: &CredentialKey, proposal_id: &[u8], agora: &AgoraId) -> Nullifier {
     Nullifier::from_bytes(
         AlgebraicHasher::new(Domain::NullifierPolicy)
             .absorb(key.expose())
@@ -90,12 +100,12 @@ pub fn policy(key: &EpochSecretKey, proposal_id: &[u8], agora: &AgoraId) -> Null
 
 /// Consumes a credential's old leaf during device migration (§9.3).
 ///
-/// This is what stops a still-live old key from spawning more than one successor
-/// credential, so it must remain unique for the life of the credential rather than the life
-/// of an epoch — a migration nullifier that changed on rollover would permit one successor
-/// per epoch, which is precisely the outcome §9.3 exists to prevent.
+/// This is what stops a still-live old key from spawning more than one successor credential,
+/// so it must remain unique for the life of the credential. A leaf sits in the accumulator
+/// indefinitely, which is why migration was the first context to require the durable key —
+/// the others followed once it became clear the epoch key cannot support a count at all.
 #[must_use]
-pub fn migration(key: &MigrationKey, agora: &AgoraId) -> Nullifier {
+pub fn migration(key: &CredentialKey, agora: &AgoraId) -> Nullifier {
     Nullifier::from_bytes(
         AlgebraicHasher::new(Domain::NullifierMigration)
             .absorb(key.expose())
@@ -107,18 +117,18 @@ pub fn migration(key: &MigrationKey, agora: &AgoraId) -> Nullifier {
 #[cfg(test)]
 mod tests {
     use super::{attestation, migration, policy, vouch};
-    use nymora_core::{AgoraId, EpochSecretKey, MessageHash, MigrationKey};
+    use nymora_core::{AgoraId, CredentialKey, EpochSecretKey, MessageHash};
 
-    fn key(byte: u8) -> EpochSecretKey {
+    fn epoch_key(byte: u8) -> EpochSecretKey {
         EpochSecretKey::new([byte; 32])
     }
 
-    /// A migration key over the *same bytes* as [`key`].
+    /// A credential key over the *same bytes* as [`epoch_key`].
     ///
     /// Deliberate: the collision test below must isolate the domain tag as the only
     /// difference between contexts. Different key bytes would make it pass trivially.
-    fn migration_key(byte: u8) -> MigrationKey {
-        MigrationKey::new([byte; 32])
+    fn cred_key(byte: u8) -> CredentialKey {
+        CredentialKey::new([byte; 32])
     }
 
     fn agora(byte: u8) -> AgoraId {
@@ -132,8 +142,8 @@ mod tests {
     #[test]
     fn is_deterministic() {
         assert_eq!(
-            attestation(&key(1), &message(2), &agora(3)),
-            attestation(&key(1), &message(2), &agora(3)),
+            attestation(&epoch_key(1), &message(2), &agora(3)),
+            attestation(&epoch_key(1), &message(2), &agora(3)),
             "the same member acting twice must be detectable"
         );
     }
@@ -141,8 +151,8 @@ mod tests {
     #[test]
     fn different_members_differ() {
         assert_ne!(
-            attestation(&key(1), &message(2), &agora(3)),
-            attestation(&key(9), &message(2), &agora(3))
+            attestation(&epoch_key(1), &message(2), &agora(3)),
+            attestation(&epoch_key(9), &message(2), &agora(3))
         );
     }
 
@@ -153,8 +163,8 @@ mod tests {
     #[test]
     fn the_same_member_is_unlinkable_across_agoras() {
         assert_ne!(
-            attestation(&key(1), &message(2), &agora(3)),
-            attestation(&key(1), &message(2), &agora(4)),
+            attestation(&epoch_key(1), &message(2), &agora(3)),
+            attestation(&epoch_key(1), &message(2), &agora(4)),
             "one member's activity correlated across two agoras"
         );
     }
@@ -166,12 +176,12 @@ mod tests {
     /// could be spent as an attestation.
     #[test]
     fn contexts_do_not_collide() {
-        let (k, m, a) = (key(1), migration_key(1), agora(3));
+        let (e, c, a) = (epoch_key(1), cred_key(1), agora(3));
         let all = [
-            vouch(&k, b"session"),
-            attestation(&k, &message(0), &a),
-            policy(&k, b"session", &a),
-            migration(&m, &a),
+            vouch(&c, b"session"),
+            attestation(&e, &message(0), &a),
+            policy(&c, b"session", &a),
+            migration(&c, &a),
         ];
         for (i, x) in all.iter().enumerate() {
             for y in &all[i + 1..] {
@@ -183,10 +193,10 @@ mod tests {
     /// `vouch` and `policy` take caller-supplied identifiers of arbitrary length.
     #[test]
     fn identifier_boundaries_are_not_malleable() {
-        assert_ne!(vouch(&key(1), b"ab"), vouch(&key(1), b"a"));
+        assert_ne!(vouch(&cred_key(1), b"ab"), vouch(&cred_key(1), b"a"));
         assert_ne!(
-            policy(&key(1), b"ab", &agora(3)),
-            policy(&key(1), b"a", &agora(3))
+            policy(&cred_key(1), b"ab", &agora(3)),
+            policy(&cred_key(1), b"a", &agora(3))
         );
     }
 }

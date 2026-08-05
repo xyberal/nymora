@@ -167,7 +167,7 @@ POST /agora/{agora_id}/policy/tier2/proposal/{id}/activate
   → { policy_version: 2 }
 ```
 
-A proposal expires at the end of the epoch in which it was raised, and must be re-raised to continue. This is not an administrative convenience: approvals are counted by nullifier, nullifiers are scoped to an epoch key (§9.1), and a proposal outliving that key could be approved a second time by the same credential under its successor.
+A proposal expires at the end of the epoch in which it was raised, and must be re-raised to continue. The reason is not nullifier comparability — approvals are counted by a nullifier derived from `sk_cred`, which does not rotate (§9.1) — but quorum freshness: a proposal that outlived the membership set it was raised under would accumulate approvals against a threshold that no longer describes the group. An early advance following a revocation expires it for the same reason (§11).
 
 Charlie, Dave, and all future members are vouched in via the identical 2-of-N (or higher) threshold flow. No credential anywhere in the agora carries a "founder" flag or distinct issuance type — every credential is structurally indistinguishable, differing only in the unavoidable fact of when it entered the accumulator.
 
@@ -240,7 +240,7 @@ POST /agora/{agora_id}/vouch/session/{id}/finalize
   → { threshold_met: true, credential_update_token }
 ```
 
-A vouch session must finalize within the epoch in which it was opened; one that does not is abandoned rather than carried over. As with policy proposals (§4.3), the threshold is counted by nullifier, and a session spanning an epoch boundary would let a single credential attest twice under two keys.
+A vouch session must finalize within the epoch in which it was opened; one that does not is abandoned rather than carried over. As with policy proposals (§4.3), this bounds how long an admission decision may accumulate attestations against a fixed threshold, rather than serving any property of the nullifier itself.
 
 Each attestation proof demonstrates, in zero knowledge:
 
@@ -552,10 +552,10 @@ sk_epoch  — freshly generated each epoch and certified by sk_root; used for ro
             day-to-day operations
 ```
 
-The accumulator leaf commits to `pk_root` (a public verification key derived from `sk_root`) and to `sk_migrate` (below), using an opening value `r_root` fixed once at credential creation:
+The accumulator leaf commits to `pk_root` (a public verification key derived from `sk_root`) and to `sk_cred` (below), using an opening value `r_root` fixed once at credential creation:
 
 ```
-leaf = Commit(pk_root, sk_migrate, r_root)
+leaf = Commit(pk_root, sk_cred, r_root)
 ```
 
 `sk_root`'s only routine job is to **certify a new epoch key** when one is generated:
@@ -578,9 +578,15 @@ The default is **7 days**, the minimum **24 hours**, and the maximum **30 days**
 
 The interval is a **maximum**, not a fixed tick: an epoch may be advanced early (§11), and is not part of the public parameters deriving `agora_id`, which are fixed at creation (§3).
 
-**Nullifier keys are scoped to the window they guard.** A nullifier enforces "at most once" only for the lifetime of the key that produced it, and the verifier has no other handle on identity to fall back on. Vouching (§5.3), policy approval (§4.3), and authorship (§6.1) guard objects that live within a single epoch, and use `sk_epoch` accordingly.
+An epoch ends at whichever comes first: the transparency log publishing an advance (§10.1), or the maximum interval elapsing on the local clock. Failing toward the earlier signal is deliberate — a key recognised as expired too late outlives its window and cannot be recovered, while one destroyed too early costs a single re-certification. A member out of contact may still certify a key against the last epoch they know of, and risks rejection if the agora has advanced.
 
-Migration is the exception. A credential leaf remains in the accumulator indefinitely, so its consuming nullifier must remain valid indefinitely. Each credential therefore carries `sk_migrate`, generated at creation, committed in its leaf, never rotated, and used for no other purpose. Like `r_root` it is a witness the circuit recomputes against, so it is exported on every migration proof and held in software rather than hardware.
+**Nullifier keys are scoped to the window they guard.** A nullifier enforces "at most once" only for the lifetime of the key that produced it, and the verifier has no other handle on identity to fall back on. Authorship (§6.1) uses `sk_epoch`: its window is one epoch, and the paragraphs below explain why it is also the one context where a longer-lived key would cost something.
+
+Migration is the exception that first required this. A credential leaf remains in the accumulator indefinitely, so its consuming nullifier must remain valid indefinitely. Each credential therefore carries `sk_cred`, generated at creation, committed in its leaf, never rotated, and used for every nullifier whose count must be correct. Like `r_root` it is a witness the circuit recomputes against, so it is exported on every proof that uses it and held in software rather than hardware.
+
+**A credential may hold more than one epoch key in an epoch, and nothing can prevent it.** Certification is purely local, so a member may generate and certify a second `sk_epoch` for the same epoch number at will. The verifier cannot detect this: `pk_epoch` is a private witness (below), and publishing it to make duplicates visible would reintroduce the same-epoch linkability it is kept private to prevent. Enforcement below the verifier — a monotonic counter in the authenticator, say — is advisory only, since the member who would exploit this controls the device.
+
+Any count that must be correct therefore cannot rest on the epoch key. Vouching (§5.3), policy approval (§4.3), and migration (§9.3) all derive their nullifiers from `sk_cred`, which is one per credential by construction. Authorship (§6.1) continues to use `sk_epoch`: its objects are public, so a durable key there would permit retroactive attribution of content, and its uniqueness is in any case secondary to the proof's binding to `message_hash`.
 
 Every ordinary proof — vouching, authoring content, corroborating, live authentication (§8) — uses `sk_epoch`, together with `epoch_cert`, inside a single zero-knowledge proof that checks the whole chain without ever exposing `pk_epoch` or the certificate as plaintext:
 
@@ -595,7 +601,7 @@ Every ordinary proof — vouching, authoring content, corroborating, live authen
 
 **What this bounds:** if `sk_epoch` is compromised, the attacker can forge nullifiers and impersonate the member only for that one epoch — including retroactively recomputing that epoch's own past nullifiers, since `Hash(sk_epoch, context)` is deterministic. Prior epochs' keys have already been discarded and cannot be reconstructed from the current one, so past activity outside the compromised epoch stays unlinkable even to someone holding the current key. This is the same forward-secrecy principle behind ratcheting message keys, applied here to credential-derived nullifiers.
 
-Attribution is bounded with it, with one exception. `sk_migrate` is durable by necessity, so an adversary holding it can confirm that two leaves belong to the same credential lineage across a migration. That is a single linkage per migration; it does not extend to content, whose nullifiers expire with the epoch key that produced them.
+Attribution is bounded with it, with one exception. `sk_cred` is durable by necessity, so an adversary holding it can confirm that two leaves belong to the same credential lineage across a migration. That is a single linkage per migration; it does not extend to content, whose nullifiers expire with the epoch key that produced them.
 
 **What this does not bound:** compromise of `sk_root` itself. Since `sk_root` can sign arbitrary future epoch certificates and is the credential authorized to participate in root-level governance actions (quorum votes, re-keying, dissolution — §5.3, §12), its compromise is effectively total and permanent for that credential, which is precisely why `sk_root` deserves the heavier protection described next, rather than living alongside `sk_epoch` in the same routinely-used storage.
 
@@ -607,10 +613,10 @@ This is acceptable because `r_root` authorizes nothing. Its sole function is to 
 graph TD
     HW["Hardware authenticator<br/>(secure enclave / FIDO2 key)<br/><i>§9.2 — non-exportable</i>"]
     HW -->|generates internally| SKR["sk_root<br/><i>used rarely: epoch certs,<br/>governance quorum actions</i>"]
-    SKR -->|derives| PKR["pk_root<br/><i>committed in accumulator:<br/>leaf = Commit(pk_root, sk_migrate, r_root)</i>"]
+    SKR -->|derives| PKR["pk_root<br/><i>committed in accumulator:<br/>leaf = Commit(pk_root, sk_cred, r_root)</i>"]
     SKR -->|"signs each epoch"| CERT["epoch_cert = Sign(sk_root,<br/>{epoch_number, pk_epoch})"]
 
-    CERT -.->|"certifies"| SKE["sk_epoch + r_root + sk_migrate<br/><i>epoch key generated fresh each epoch;<br/>r_root and sk_migrate static, software-held;<br/>used for all routine ops</i>"]
+    CERT -.->|"certifies"| SKE["sk_epoch + r_root + sk_cred<br/><i>epoch key generated fresh each epoch;<br/>r_root and sk_cred static, software-held;<br/>used for all routine ops</i>"]
 
     SKE --> V["Vouching (§5.3)"]
     SKE --> AU["Authoring / corroborating (§6)"]
@@ -665,15 +671,15 @@ A direct consequence of non-exportable, hardware-bound root keys: a device chang
 ```
 Old device: migration_cert = Sign(sk_root_old, {pk_root_new, agora_id})
 New device: generates a fresh (sk_root_new, r_root_new, pk_root_new) internally, hardware-backed as in §9.2
-            carries sk_migrate over from the old credential — it is not regenerated
+            carries sk_cred over from the old credential — it is not regenerated
 
 POST /agora/{agora_id}/credentials/migrate
-  body: { migration_cert, new_commitment: Commit(pk_root_new, sk_migrate, r_root_new) }
+  body: { migration_cert, new_commitment: Commit(pk_root_new, sk_cred, r_root_new) }
 ```
 
 The migration is verified (ideally itself wrapped in a ZK proof rather than transmitted with `pk_root_old` in the clear, consistent with this design's general avoidance of exposing linkable identifiers) against the old, still-valid leaf. On success, the agora's accumulator attributes — tenure, vouch count, tier — carry over to the new leaf, and the old leaf is consumed via a migration-specific nullifier, preventing a still-live old key from being used to spawn more than one successor credential.
 
-The successor leaf commits to the **same** `sk_migrate` as the leaf it replaces, proven in zero knowledge alongside the migration itself. Were a fresh key generated instead, each migration would launder the nullifier consuming the previous leaf, and a member could spawn successor credentials without limit — every one of them carrying the tenure, vouch count, and tier of the original. Path 2 cannot preserve `sk_migrate`, since it presumes the old key is unreachable; uniqueness resets there, gated by the quorum revocation that path already requires.
+The successor leaf commits to the **same** `sk_cred` as the leaf it replaces, proven in zero knowledge alongside the migration itself. Were a fresh key generated instead, each migration would launder the nullifier consuming the previous leaf, and a member could spawn successor credentials without limit — every one of them carrying the tenure, vouch count, and tier of the original. Path 2 cannot preserve `sk_cred`, since it presumes the old key is unreachable; uniqueness resets there, gated by the quorum revocation that path already requires.
 
 **Path 2 — lost, stolen, or seized device (old device unreachable).** No migration certificate can be produced without the old key, so this path falls back to ordinary quorum-based revocation (§11) of the old credential, followed by fresh admission on new hardware via the standard vouching flow (§5.3). No continuity is preserved — this is the accepted cost when the old key genuinely cannot be reached. The group may choose to accelerate re-vouching for a known, previously-vouched member (existing vouchers can re-attest quickly, since the real-world trust judgment hasn't changed, only the cryptographic anchor), but the resulting credential is, structurally, new.
 

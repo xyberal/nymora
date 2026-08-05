@@ -23,6 +23,11 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (proposal 0006).
 
 ### Added
+- Specification §9.1: an epoch ends at whichever comes first — the transparency log
+  publishing an advance, or the maximum interval elapsing on the local clock. Failing toward
+  the earlier signal is deliberate, since a key recognised as expired late outlives its
+  window irrecoverably while one destroyed early costs a single re-certification (proposal
+  0008).
 - Specification §9.1: epoch length is a per-agora policy, default 7 days, bounded to
   [24 hours, 30 days] (proposal 0007).
 - Specification §9.1, §11: an epoch may be advanced early, and revocation advances it
@@ -31,19 +36,26 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   had silently capped the "prompt revocation" §11 relies on (proposal 0007).
 
 ### Fixed
+- Specification §4.3, §5.3, §9.1, §9.3: every nullifier whose **count** must be correct now
+  derives from a credential's durable `sk_cred`, committed in the leaf and carried across
+  planned migration — vouching thresholds, policy approvals, and the migration nullifier
+  consuming a leaf. Previously all three keyed on `sk_epoch`, which cannot support a count at
+  all: certification is purely local, so a member can certify a second epoch key for the same
+  epoch and produce two nullifiers for one action, and the verifier cannot detect it because
+  `pk_epoch` is a private witness. A member could therefore satisfy an admission threshold
+  alone, approve a proposal repeatedly, or spawn successor credentials without limit — each
+  inheriting the original's tenure, vouch count, and tier.
+
+  Authorship keeps `sk_epoch`: its objects are public, so a durable key there would let an
+  adversary holding it recompute nullifiers over every published bundle and attribute a
+  member's content retroactively. Policy proposals and vouch sessions still expire with the
+  epoch that raised them, now for quorum freshness rather than for any property of the
+  nullifier (proposals 0005 and 0008).
 - Specification §9.1: destroying an epoch key is triggered by the epoch **ending**, not by a
   successor being certified. Certification happens when a member next acts, so under the
   previous wording an inactive member never completed a rollover and never deleted — making
   the forward-secrecy window their activity gap rather than one epoch. A member with no
   current activity now holds no usable epoch key at all (proposal 0007).
-- Specification §4.3, §5.3, §9.1, §9.3: every nullifier's key lifetime now matches the
-  window it guards. A nullifier enforces "at most once" only for as long as its key lives,
-  and the verifier has no other handle on identity — so policy proposals and vouch sessions
-  now expire with the epoch that raised them, and the credential leaf, which has no bound,
-  gains a durable `sk_migrate` committed in the leaf and carried across planned migration.
-  Previously a member could approve a proposal once per epoch, satisfy a vouching threshold
-  alone across rollovers, or spawn one successor credential per epoch — each inheriting the
-  original's tenure, vouch count, and tier (proposal 0005).
 - Specification: the receipt ledger is scoped **per credential**, not per Persora (§2, §10.2,
   §14). The per-Persora reading would have disclosed a member's full cross-agora activity to
   a ledger replay witness (proposal 0002).
