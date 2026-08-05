@@ -7,6 +7,34 @@
 > they guard" paragraph — added by 0005 — listed vouching, policy approval, and authorship as
 > epoch-scoped. Three of those move here, so the paragraph was rewritten to introduce
 > authorship alone rather than left contradicting the text below it.
+>
+> **Amendment — the application was incomplete, and was finished later.** A review found four
+> places in §9.1 that this proposal's decision invalidated and that the original application
+> did not reach. They are corrections to this proposal's own application, not new decisions;
+> every one follows from the text above.
+>
+> 1. The paragraph introducing the routine-proof statement still read *"Every ordinary proof —
+>    vouching, authoring content, corroborating, live authentication — uses `sk_epoch`"*, and
+>    the statement's nullifier line still read `Hash(sk_epoch, message_hash, agora_id)`. For
+>    vouching both the key and the context were wrong, two paragraphs after the text saying so.
+>    This was the most consequential miss: the statement block is what a circuit implementer
+>    transcribes, and it contradicted the decision it was supposed to follow.
+> 2. That statement's witness list omitted `sk_cred`, although the leaf it opens commits to it
+>    — `Commit(pk_root, sk_cred, r_root)`. A statement naming only `r_root` cannot open that
+>    leaf. The list is now correct and says why.
+> 3. The `r_root` paragraph still named the two-argument leaf `Commit(pk_root, r_root)`. The
+>    same stale expression had propagated into `nymora-core`'s `Domain::Commitment` and
+>    `Commitment` doc comments, and was corrected there too.
+> 4. The certification-by-use paragraph claimed a seized dormant device *"yields nothing that
+>    can recompute even the previous epoch's nullifiers."* That was true when 0007 wrote it and
+>    false once this proposal made three nullifier contexts durable: such a device still holds
+>    `sk_cred` and `r_root`. The claim is now bounded to authorship, with the governance
+>    exposure stated rather than implied.
+>
+> Item 4 is why this amendment exists rather than a fresh proposal. The failure mode is not
+> that a decision was wrong; it is that a decision's consequences were applied where the
+> proposal pointed and not where they also reached. A proposal that changes what a key *is*
+> touches every claim resting on what that key *was*.
 **Answers:** the open question left by 0007 — who decides an epoch has ended
 **Corrects:** the rationale 0005 gave for epoch-bounding proposals and vouch sessions, and
 renames the durable key it introduced

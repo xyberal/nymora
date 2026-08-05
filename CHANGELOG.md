@@ -36,6 +36,16 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   had silently capped the "prompt revocation" §11 relies on (proposal 0007).
 
 ### Fixed
+- Specification §9.1: completed proposal 0008's application, which had left four claims
+  standing that its own decision invalidated. The routine-proof statement still said vouching
+  used `sk_epoch` and still carried authorship's nullifier formula, two paragraphs after the
+  text saying otherwise — the block a circuit implementer transcribes. Its witness list omitted
+  `sk_cred`, which the leaf commits to and which is required to open it. The `r_root` paragraph
+  still named the two-argument leaf `Commit(pk_root, r_root)`, as did `Domain::Commitment` and
+  the `Commitment` newtype in `nymora-core`. And the claim that a seized dormant device cannot
+  recompute past nullifiers, true when 0007 wrote it, is now bounded to authorship: such a
+  device still holds `sk_cred` and `r_root`, which reproduce every vouching, policy-approval,
+  and migration nullifier the credential ever made.
 - Specification §4.3, §5.3, §9.1, §9.3: every nullifier whose **count** must be correct now
   derives from a credential's durable `sk_cred`, committed in the leaf and carried across
   planned migration — vouching thresholds, policy approvals, and the migration nullifier

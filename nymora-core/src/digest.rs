@@ -62,7 +62,7 @@ digest_newtype! {
     /// it; nullifiers from different domains are unrelated.
     Nullifier,
 
-    /// An accumulator leaf, `Commit(pk_root, r_root)` (§9.1).
+    /// An accumulator leaf, `Commit(pk_root, sk_cred, r_root)` (§9.1).
     Commitment,
 
     /// The root of an accumulator at one epoch (§5.2).

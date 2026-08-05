@@ -568,7 +568,9 @@ epoch_cert = Sign(sk_root, {epoch_number, pk_epoch})
 
 The corollary is a deletion requirement, and its trigger is the clock rather than the rollover: when an epoch ends, that epoch's key is destroyed, whether or not a successor has been certified. Forward secrecy across epochs rests on that deletion, not on the derivation structure — there is none.
 
-**Certification, by contrast, is triggered by use.** `epoch_cert` never leaves the device (below), so certifying a new epoch key is a purely local operation with no counterparty and nothing published; a member needs a current key only at the moment they act. There is therefore no reason to certify one at the start of every epoch, and good reason not to: a member with no current activity holds no usable epoch key at all, so a seized dormant device yields nothing that can forge a proof and nothing that can recompute even the previous epoch's nullifiers. Members who only read need never certify a key, since resolving tags uses the broadcast `K_tag_e` (§6.4) and verifying content uses the accumulator root.
+**Certification, by contrast, is triggered by use.** `epoch_cert` never leaves the device (below), so certifying a new epoch key is a purely local operation with no counterparty and nothing published; a member needs a current key only at the moment they act. There is therefore no reason to certify one at the start of every epoch, and good reason not to: a member with no current activity holds no usable epoch key at all, so a seized dormant device yields nothing that can forge a proof and nothing that can recompute the authorship nullifiers of any past epoch.
+
+What such a device does still yield is `sk_cred` and `r_root`, which are durable and software-held (below). Those recompute every vouching, policy-approval, and migration nullifier the credential has ever produced, in any epoch. **The dormancy bound covers content, not governance** — an important limit, since it is easy to read the paragraph above as saying an inactive device is empty. Members who only read need never certify a key, since resolving tags uses the broadcast `K_tag_e` (§6.4) and verifying content uses the accumulator root.
 
 One consequence is worth stating for implementers: the cost of hardware-backed custody (§9.2) scales with a member's activity, not with elapsed time. A member inactive across ten epochs pays one user-presence prompt when they next act, not ten.
 
@@ -588,14 +590,18 @@ Migration is the exception that first required this. A credential leaf remains i
 
 Any count that must be correct therefore cannot rest on the epoch key. Vouching (§5.3), policy approval (§4.3), and migration (§9.3) all derive their nullifiers from `sk_cred`, which is one per credential by construction. Authorship (§6.1) continues to use `sk_epoch`: its objects are public, so a durable key there would permit retroactive attribution of content, and its uniqueness is in any case secondary to the proof's binding to `message_hash`.
 
-Every ordinary proof — vouching, authoring content, corroborating, live authentication (§8) — uses `sk_epoch`, together with `epoch_cert`, inside a single zero-knowledge proof that checks the whole chain without ever exposing `pk_epoch` or the certificate as plaintext:
+Every ordinary proof — authoring content, vouching, policy approval, live authentication (§8) — establishes the same membership chain inside a single zero-knowledge proof, which checks it without ever exposing `pk_epoch` or the certificate as plaintext:
 
 ```
-∃ sk_epoch, r_root, pk_epoch, epoch_cert, merkle_path such that:
+∃ sk_epoch, sk_cred, r_root, pk_epoch, epoch_cert, merkle_path such that:
   epoch_cert verifies as a valid signature over pk_epoch, by some pk_root committed in Root_tier2
-  ∧ r_root correctly opens that credential's committed leaf
-  ∧ nullifier = Hash(sk_epoch, message_hash, agora_id)
+  ∧ sk_cred and r_root together open that credential's committed leaf
+  ∧ the action's own output is correctly derived (below)
 ```
+
+Both `sk_cred` and `r_root` appear as witnesses because the leaf commits to both (above); a statement naming only `r_root` cannot open it.
+
+**Only the last line varies by action, and it is where the key choice above takes effect.** Authorship (§6.1) derives its nullifier from the epoch key — `Hash(sk_epoch, message_hash, agora_id)` — so that attribution expires with that key. Vouching (§5.3), policy approval (§4.3), and migration (§9.3) derive theirs from `sk_cred` over the identifier of the session, proposal, or leaf they consume, because each is a count and a count cannot rest on a key the member can mint twice. Live authentication (§8) posts a pseudonym rather than a nullifier, derived as §8.1 specifies.
 
 `pk_epoch` is a **private witness only** — it is never transmitted as a public input alongside a proof. Making it public would reintroduce exactly the kind of same-epoch cross-post linkability this design closed for authorship (§6.2) and corroboration (§6.3): every attestation in a given epoch would otherwise share an identical, comparable `pk_epoch` value, letting an observer link them without needing any other pseudonym field. Folding certificate verification entirely inside the proof keeps the output a single bit — `valid: true/false` — consistent with every other proof in this design (§6.5).
 
@@ -605,7 +611,7 @@ Attribution is bounded with it, with one exception. `sk_cred` is durable by nece
 
 **What this does not bound:** compromise of `sk_root` itself. Since `sk_root` can sign arbitrary future epoch certificates and is the credential authorized to participate in root-level governance actions (quorum votes, re-keying, dissolution — §5.3, §12), its compromise is effectively total and permanent for that credential, which is precisely why `sk_root` deserves the heavier protection described next, rather than living alongside `sk_epoch` in the same routinely-used storage.
 
-**`r_root` is a blinding value, not authority, and is held in software.** Every proof of root-leaf membership must open `Commit(pk_root, r_root)`, which requires `r_root` itself as a witness. No per-epoch substitute is possible: any derivation one-way enough to protect `r_root` is, by construction, unable to open a commitment formed with it. `r_root` is therefore supplied on every routine proof, and cannot meaningfully be held in hardware custody — a value exported on every operation is not hardware-held in any useful sense.
+**`r_root` is a blinding value, not authority, and is held in software.** Every proof of root-leaf membership must open `Commit(pk_root, sk_cred, r_root)`, which requires `r_root` itself as a witness. No per-epoch substitute is possible: any derivation one-way enough to protect `r_root` is, by construction, unable to open a commitment formed with it. `r_root` is therefore supplied on every routine proof, and cannot meaningfully be held in hardware custody — a value exported on every operation is not hardware-held in any useful sense.
 
 This is acceptable because `r_root` authorizes nothing. Its sole function is to hide `pk_root` from Skiora, which receives only the commitment at credential creation. An adversary holding `r_root` alone can forge no proof, sign no certificate, and impersonate no one; the value becomes useful only in combination with a candidate `pk_root`, and an adversary positioned to obtain both already holds the device. `r_root` is stored with `sk_epoch` in ordinary OS-protected storage, and is not rotated.
 
