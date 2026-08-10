@@ -9,10 +9,15 @@
 
 ## Problem
 
-This is a scope decision, like 0006. It is written up because the receipt ledger is not an
-isolated feature: three subsections, one bullet on the public log, and an entire unlinkability
-apparatus exist only to support it, and removing it changes what §10 claims. That coupling
-needs recording where a future implementer will find it.
+This began as a scope decision, like 0006, and is written up because the receipt ledger is not
+an isolated feature: three subsections, one bullet on the public log, and an entire
+unlinkability apparatus exist only to support it, and removing it changes what §10 claims. That
+coupling needs recording where a future implementer will find it.
+
+It has since become less of a judgement call. The first three subsections below are the original
+argument — the mechanism is contradictory as specified, and both known repairs are expensive.
+The fourth was added later and is the stronger one: **§10.4 cannot be implemented at all without
+two primitives the design does not have.**
 
 ### The mechanism does not currently work as specified
 
@@ -68,6 +73,62 @@ does not specify — and its privacy rests on per-epoch entropy held only by the
 exactly why a member who loses chain state is locked out of their own credential. 0009 records
 that as an open question. It is not answerable: recoverability from durable secrets and
 unlinkability against durable secrets are the same statement with opposite signs.
+
+### §10.4 is not implementable, and that is a stronger objection than cost
+
+Everything above is an argument that the ledger is expensive and strained. A later review found
+something firmer: **§10.4's replay-witness selection requires two primitives the design does not
+have, and its own construction leaks what §5.2 forbids.**
+
+**It cites a primitive that cannot do this job.** §10.4 says selection "uses public randomness
+Skiora cannot bias (the jointly-derived-randomness primitive from §8.1)." §8.1 is a commit-reveal
+among the participants of a *live session* — it needs a known participant set, all online
+simultaneously, and `channel_metadata` from a live channel's handshake. Witness selection has
+none of those: the candidate set is the whole anonymous membership, they are not simultaneously
+online, and there is no channel. Proposal 0012 corrected a genuine bias flaw in §8.1, and did not
+make it applicable here. What §10.4 needs is a public randomness beacon, which appears nowhere in
+the design; the transparency log's signed tree heads are the nearest thing and Skiora produces
+them, so it can grind them.
+
+**It needs a delivery mechanism that does not exist.** The holder must send their full ledger to
+the selected witness, who is anonymous by construction — the point is that they prove selection
+"without revealing which member that is." §6.4's tags route content to *the agora*, resolved by
+every member trying their keys; that is broadcast. §8 authenticates members already sharing a
+channel. Nothing in the protocol delivers a private message to an anonymously-selected
+counterparty.
+
+**Selection leaks membership size, which §5.2 forbids without qualification.** §5.2: *"No API
+surface exposes accumulator size, leaf count, or leaf listing, at any point."* §5.4 rules out
+decoy padding, so occupancy is information about real members. Any mechanism that samples from
+the membership has an observable response rate, and response rate × selection probability =
+membership size. Selecting by leaf index makes it blatant, since most indices are empty. The
+natural repair — a VRF-style lottery where each member checks `H(sk_cred, R) < t` and proves
+selection in zero knowledge — removes the empty-slot problem and still leaks: the number of
+respondents is binomial in the membership size, and setting `t` so that roughly one member
+responds requires already knowing it. This is not a construction defect. Sampling from a set
+reveals the set's size.
+
+That lottery form also lands on the pattern 0011 has since enumerated: `H(sk_cred, R)` with
+public `R` and observable selection lets anyone who later obtains `sk_cred` determine whether
+that member was selected in any past round.
+
+**The section violates its own title.** §10.4 is called "Keeping the ledger from becoming an
+activity graph." It protects the ledger from Skiora and then hands it, entire, to a randomly
+chosen fellow member — while §1 lists "infiltration by a genuinely-admitted member" among the
+capabilities the design accounts for. The member-*chosen* witness is fine; the verifiably-random
+branch exists precisely so the member cannot choose, which is what makes it unsafe.
+
+**Two smaller errors.** §10.4 resolves witness disagreement by recomputation, "the witness whose
+result does not match is the faulty one" — but if two witnesses were shown *different ledgers*,
+which is the attack §10.3 exists to catch, both recompute correctly and the faulty party is the
+holder. And a selected member who stays silent is indistinguishable from one never selected,
+offline, or non-existent, so a rogue Persora is never audited by simply not replying.
+
+**What this changes about the decision.** Deferring §10.2–§10.4 was a judgement about whether
+the ledger earns its cost. It is now closer to a forced move: making §10.4 implementable means
+specifying a randomness beacon *and* an anonymous unicast channel, then accepting a cardinality
+leak the specification prohibits in absolute terms. Each of those is a larger undertaking than
+the ledger itself.
 
 ### Why it keeps generating problems
 
@@ -230,6 +291,26 @@ are unchanged.
 > advances, so the published value is a function of nothing durable. It closes retroactive
 > linkage without an accumulator, at the cost of proving the iteration in-circuit and of a
 > recovery story for the seed.
+>
+> **The replay-witness mechanism needs more than a handle.** Settling the pinning question would
+> still leave this section unimplementable, because it rests on two primitives the design does
+> not provide. Selection needs public randomness no party can bias over an anonymous membership
+> that is not simultaneously online — a beacon, not the commit-reveal of §8.1, which this section
+> cites and which requires a known participant set on a live channel. Delivery needs a private
+> message to a counterparty who is anonymous by construction, and §6.4's tags route to an agora
+> by broadcast rather than to a member.
+>
+> Selection also discloses membership size. Any sampling of the membership has an observable
+> response rate, and response rate against selection probability yields the count that §5.2
+> withholds "at any point" — a property of sampling rather than of any particular construction,
+> so it does not yield to a better one. And the full ledger goes to whoever is selected, which
+> in the verifiably-random case is a member the holder did not choose and §1 allows to be an
+> infiltrator.
+>
+> Finally, two corrections for whoever picks this up: recomputation does not resolve a
+> disagreement between witnesses shown *different* ledgers — both recompute correctly, and the
+> faulty party is the holder, not a witness — and a selected member who simply does not reply is
+> indistinguishable from one never selected, so the check is unenforceable as described.
 
 ### §14 — capabilities summary
 
