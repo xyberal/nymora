@@ -72,6 +72,11 @@ impl<const DEPTH: usize> Tree<DEPTH> {
     /// Returns `None` only when the tree is full. There is no other failure: append-only means
     /// there is no occupied position to collide with, and so no error that could distinguish an
     /// occupied position from an empty one (§5.2).
+    ///
+    /// A full tree is not a transient condition. §5.2 makes exhaustion terminal for the policy
+    /// class — no further admission and no further migration under the current protocol version
+    /// — which is why depth is sized at creation for every credential the agora will ever
+    /// issue, not for its expected membership.
     pub fn append(&mut self, value: Commitment) -> Option<u64> {
         let position = self.leaves.len() as u64;
         if Self::capacity().is_some_and(|max| position >= max) {

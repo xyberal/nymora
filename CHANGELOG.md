@@ -53,6 +53,20 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   immediately. §11 now states the revocation asymmetry it closes — write capability ends at
   once, while read capability would otherwise persist until the next tag-key broadcast, which
   had silently capped the "prompt revocation" §11 relies on (proposal 0007).
+- Specification §9.1: the epoch-advance signal for agoras **without a transparency log** —
+  the log is opt-in, so for an agora that declines it the authoritative signal is a signed
+  epoch-advance statement served by Skiora on the member-gated `K_tag_e` broadcast channel
+  (§6.4), with the local-clock maximum as backstop. Previously the only specified signals
+  were the log and the clock, and the clock cannot carry an early advance — leaving §11's
+  revocation-triggered immediate advance with no delivery path in exactly the
+  existence-sensitive, log-declining deployments most likely to need prompt revocation.
+- Specification §5.2: accumulator **exhaustion is terminal** for a policy class under the
+  current protocol version — no further admission and, because migration consumes capacity,
+  no routine device change either. No mechanism compacts, extends, or re-accumulates a tree;
+  a re-accumulation ceremony would be a protocol-version event with its own proposal. The
+  actionable consequence is stated where implementers previously had to infer it: size depth
+  generously at creation, where the cost is logarithmic — depth 32 is roughly four billion
+  leaves at thirty-two siblings per witness.
 
 ### Changed
 - Specification §9.1: the credential leaf commits to its agora —

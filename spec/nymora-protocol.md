@@ -231,6 +231,8 @@ First, **presence in the accumulator does not by itself mean a credential is cur
 
 Second, **depth must be sized for every credential the agora will ever issue**, not for its live membership. Migrated predecessors and revoked members consume capacity permanently, and since planned migration is the expected path for a routine device change, consumption tracks device churn rather than recruitment.
 
+**Exhaustion is terminal for the class.** A policy class whose accumulator is full admits no further leaf under the current protocol version — no new admission and, because migration consumes capacity, no routine device change either, which is the worse of the two. No mechanism compacts, extends, or re-accumulates a tree: leaves cannot be withdrawn (above), and a re-accumulation ceremony would change every member's witness and the class's root lineage at once — a protocol-version event requiring its own proposal, not an operational recovery. The mitigation is to size depth generously at creation, where the cost is logarithmic: depth 32 accommodates roughly four billion leaves at thirty-two siblings per witness. Size for the agora that outlives its founders, because there is no second chance later.
+
 ### 5.3 Vouching protocol
 
 Admission of a new candidate requires k-of-n independent zero-knowledge attestations from existing eligible members:
@@ -607,6 +609,8 @@ The default is **7 days**, the minimum **24 hours**, and the maximum **30 days**
 The interval is a **maximum**, not a fixed tick: an epoch may be advanced early (§11), and is not part of the public parameters deriving `agora_id`, which are fixed at creation (§3).
 
 An epoch ends at whichever comes first: the transparency log publishing an advance (§10.1), or the maximum interval elapsing on the local clock. Failing toward the earlier signal is deliberate — a key recognised as expired too late outlives its window and cannot be recovered, while one destroyed too early costs a single re-certification. A member out of contact may still certify a key against the last epoch they know of, and risks rejection if the agora has advanced.
+
+The transparency log is opt-in (§10.1), so it cannot be the only advance signal. For an agora without a log, the authoritative signal is a **signed epoch-advance statement** served by Skiora, distributed on the same member-gated channel that carries the `K_tag_e` broadcast (§6.4); the local-clock maximum remains the backstop, and a member acts on whichever signal arrives first, exactly as above. This matters most where it is least convenient: revocation advances the epoch immediately (§11), and the agoras most likely to decline a log — the most existence-sensitive ones — are also the ones that most need prompt revocation to take effect. An early advance must therefore never depend on a mechanism an agora may have opted out of.
 
 **Nullifier keys are scoped to the window they guard.** A nullifier enforces "at most once" only for the lifetime of the key that produced it, and the verifier has no other handle on identity to fall back on. Authorship (§6.1) uses `sk_epoch`: its window is one epoch, and the paragraphs below explain why it is also the one context where a longer-lived key would cost something.
 
