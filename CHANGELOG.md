@@ -57,6 +57,18 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   had silently capped the "prompt revocation" §11 relies on (proposal 0007).
 
 ### Fixed
+- Specification §5.2, §9.1, §9.3, §10.1, §11: every routine proof must establish
+  **currency**, not only inclusion — the credential's leaf absent from the revocation set
+  and its migration nullifier unspent, proven as non-membership against two per-epoch
+  exclusion roots served whole to members. Under the append-only accumulator a revoked
+  credential's leaf never leaves the tree, certification is purely local, and Skiora cannot
+  tell whose proof it is checking, so revocation had silently stopped ending write
+  capability — and a migrated-away device could author indefinitely, since authorship
+  nullifiers derive from the epoch key and never collide with the successor's. The
+  migration nullifier now also binds the leaf it consumes, `Hash(sk_cred, leaf, agora_id)`,
+  as §9.1 already required: `sk_cred` is constant across a lineage, so the key-only
+  derivation the code carried was spent once at the first migration, capping every
+  credential at a single device change (proposal 0015).
 - Specification §8.1: the jointly-derived session context is combined with a **hash over
   length-framed, canonically ordered contributions**, not XOR. XOR is its own inverse and
   nothing required commitments to be distinct, so a participant could copy another's

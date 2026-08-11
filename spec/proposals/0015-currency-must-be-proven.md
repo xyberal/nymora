@@ -1,11 +1,23 @@
 # Proposal 0015 — Currency must be proven, not presumed
 
-**Status:** **Proposed**
+**Status:** **Applied** — the sections below are now normative in the specification
 **Affects:** §5.2, §7, §8.3, §9.1, §9.3, §10.1, §11
 **Depends on:** 0014, which removed deletion as an enforcement mechanism and thereby exposed
 this; 0008 and 0013, whose leaf and nullifier constructions the repair builds on
 **Corrects:** §11's claim that revocation ends write capability at once, and
 `nymora-crypto`'s migration nullifier, which diverges from §9.1 as written
+
+> **Applied with three placement decisions.** The served-whole paragraph sits after §11's
+> early-advance paragraph rather than directly after the asymmetry paragraph, which reads
+> straight into the epoch-advance mechanics. The epoch-boundary timing rule, stated in the
+> Decision but absent from the drafted replacement text, is applied in §9.3 alongside the
+> nullifier construction. And the structure sentence — keyed accumulators with
+> non-membership witnesses, fixed with the proving system — is applied in §9.1's
+> public-inputs paragraph, so the specification carries it rather than only this proposal.
+>
+> The `nullifier::migration` conformance fix landed with the application:
+> `migration(key, leaf, agora)`, with the `nullifier/migration` vector regenerated and
+> cross-checked against an independent implementation of the framing and hash.
 
 ---
 

@@ -227,7 +227,7 @@ GET /agora/{agora_id}/accumulator/{policy_class}/root   [member-gated — see §
 
 Two consequences follow, and both are easy to get wrong in the opposite direction.
 
-First, **presence in the accumulator does not by itself mean a credential is current.** A credential is current when its leaf is present, its migration nullifier is unspent (§9.3), and it is absent from the revocation set (§11). A verifier checking only inclusion accepts superseded and revoked credentials.
+First, **presence in the accumulator does not by itself mean a credential is current.** A credential is current when its leaf is present, its migration nullifier is unspent (§9.3), and it is absent from the revocation set (§11). All three conditions are established inside every routine proof (§9.1): inclusion by the membership path, the other two by non-membership proofs against the revocation-set and migration-spend roots. An implementation verifying inclusion alone is nonconformant, not merely weaker.
 
 Second, **depth must be sized for every credential the agora will ever issue**, not for its live membership. Migrated predecessors and revoked members consume capacity permanently, and since planned migration is the expected path for a routine device change, consumption tracks device churn rather than recruitment.
 
@@ -550,7 +550,7 @@ Every participant reads their Persora's SAS aloud, or holds it up, and the group
 
 **Offline verification requires pre-cached roots.** Checking `proof_i` against `Root_tier_K` normally means a live, member-gated fetch from the Skiora (§7) — often unavailable in a location chosen for an in-person meeting under this threat model. The practical mitigation is for each participant's Persora to fetch and cache the current root (and a reasonable span of recent epochs) while still online, before the meeting, so that verification during the gathering is done entirely from local, pre-fetched material with no network dependency at all. This is arguably a security improvement in its own right, since it means the meeting itself generates no live network traffic to correlate.
 
-**Revocation staleness.** Revocation status (§11) generally does require live connectivity to be current. A member revoked shortly before the meeting, with no participant's Persora having synced since, will not be caught by an offline, pre-cached check. In-person authentication under this design should be understood as confirming "was a valid member as of my last sync," not "is definitely still valid this instant" — worth weighing accordingly against an online authentication, which can check revocation status live.
+**Revocation staleness.** Revocation status (§11) generally does require live connectivity to be current. A member revoked shortly before the meeting, with no participant's Persora having synced since, will not be caught by an offline, pre-cached check. In-person authentication under this design should be understood as confirming "was a valid member as of my last sync," not "is definitely still valid this instant" — worth weighing accordingly against an online authentication, which can check revocation status live. Concretely, offline verification checks proofs against the cached exclusion roots (§9.1), so "as of my last sync" is precisely the epoch of the cached roots.
 
 ### 8.4 What this establishes, and what it doesn't
 
@@ -615,13 +615,17 @@ Any count that must be correct therefore cannot rest on the epoch key. Vouching 
 Every ordinary proof — authoring content, vouching, policy approval, live authentication (§8) — establishes the same membership chain inside a single zero-knowledge proof, which checks it without ever exposing `pk_epoch` or the certificate as plaintext:
 
 ```
-∃ sk_epoch, sk_cred, r_root, pk_epoch, epoch_cert, merkle_path such that:
+∃ sk_epoch, sk_cred, r_root, pk_epoch, epoch_cert, merkle_path, exclusion_witnesses such that:
   epoch_cert verifies as a valid signature over pk_epoch, by some pk_root committed in Root_tier2
   ∧ sk_cred and r_root together open that credential's committed leaf
+  ∧ that leaf is absent from the revocation set at the current epoch (§11)
+  ∧ Hash(sk_cred, leaf, agora_id) is absent from the migration-spend set (§9.3)
   ∧ the action's own output is correctly derived (below)
 ```
 
 Both `sk_cred` and `r_root` appear as witnesses because the leaf commits to both (above); a statement naming only `r_root` cannot open it.
+
+The revocation-set root and migration-spend root are public inputs alongside the accumulator root; a verifier accepts a routine proof only against the current epoch's three roots. Both sets are keyed accumulators supporting non-membership witnesses — a structure distinct from the positional accumulator of §5.2, fixed with the proving system (§6.5). The two non-membership clauses are what make §5.2's definition of a current credential a proven fact rather than a verifier's unaided obligation.
 
 **Only the last line varies by action, and it is where the key choice above takes effect.** Authorship (§6.1) derives its nullifier from the epoch key — `Hash(sk_epoch, message_hash, agora_id)` — so that attribution expires with that key. Vouching (§5.3), policy approval (§4.3), and migration (§9.3) derive theirs from `sk_cred` over the identifier of the session, proposal, or leaf they consume, because each is a count and a count cannot rest on a key the member can mint twice. Live authentication (§8) posts a pseudonym rather than a nullifier, derived as §8.1 specifies.
 
@@ -707,6 +711,8 @@ POST /agora/{agora_id}/credentials/migrate
 
 The migration is verified (ideally itself wrapped in a ZK proof rather than transmitted with `pk_root_old` in the clear, consistent with this design's general avoidance of exposing linkable identifiers) against the old, still-valid leaf. On success, the agora's accumulator attributes — tenure, vouch count, tier — carry over to the new leaf, and the old leaf is consumed via a migration-specific nullifier, preventing a still-live old key from being used to spawn more than one successor credential.
 
+The nullifier consuming the old leaf is `Hash(sk_cred, leaf_old, agora_id)` under its own domain. It is bound to the specific leaf being consumed, not only to the credential: `sk_cred` carries across the lineage deliberately (below), so a derivation over the key alone would be constant for the credential's life — spent once at the first migration and colliding at every subsequent one. Binding the leaf gives each migration its own spend while preserving the property that one leaf admits one successor. The consumed leaf enters the migration-spend set (§9.1) at the next epoch boundary — exclusion roots are fixed per epoch — so a superseded device retains write capability for at most the remainder of the epoch: the same bound a compromised `sk_epoch` already carries (§9.1), accepted because migration, unlike revocation (§11), is the member's own cooperative act.
+
 The successor leaf commits to the **same** `sk_cred` as the leaf it replaces, proven in zero knowledge alongside the migration itself. Were a fresh key generated instead, each migration would launder the nullifier consuming the previous leaf, and a member could spawn successor credentials without limit — every one of them carrying the tenure, vouch count, and tier of the original. Path 2 cannot preserve `sk_cred`, since it presumes the old key is unreachable; uniqueness resets there, gated by the quorum revocation that path already requires.
 
 **Path 2 — lost, stolen, or seized device (old device unreachable).** No migration certificate can be produced without the old key, so this path falls back to ordinary quorum-based revocation (§11) of the old credential, followed by fresh admission on new hardware via the standard vouching flow (§5.3). No continuity is preserved — this is the accepted cost when the old key genuinely cannot be reached. The group may choose to accelerate re-vouching for a known, previously-vouched member (existing vouchers can re-attest quickly, since the real-world trust judgment hasn't changed, only the cryptographic anchor), but the resulting credential is, structurally, new.
@@ -755,7 +761,7 @@ Each agora optionally publishes its integrity-critical state commitments to an *
 - the sequence of accumulator roots per epoch (`Root_tier2_epoch_0, Root_tier2_epoch_1, …`) — already just hashes that reveal nothing about membership (§5.2);
 - signed tree heads making the root sequence itself an append-only Merkle log, so a published root cannot later be swapped or deleted without breaking the log's hash chain;
 - policy-change events (§5.3) as committed entries — *that* a policy changed at a given epoch, never who voted;
-- the revocation-set root (§11), so revocation state is publicly consistent;
+- the revocation-set root (§11) and the migration-spend root (§9.3) — the two exclusion roots every routine proof proves non-membership against — so exclusion state is publicly consistent and cannot be forked per member;
 - pinned per-credential ledger heads (§10.3), so a rogue Skiora cannot secretly permit a client to fork its personal ledger.
 
 **Never on the log:** nullifiers, attestation bundles, content, tags, individual membership commitments, or verification receipts tied to members. The line is aggregate, identity-free state commitments only; anything per-action or per-member stays off.
@@ -841,9 +847,11 @@ This requires the Skiora to maintain a private internal index from attestation-n
 
 **Scoping, by explicit design decision:** this status check is **internal-only**. It is never included in, or derivable from, anything shared outside the agora. Externally, the group's attestation remains permanent and unconditional — "the group vouched for this at the time" — regardless of later internal governance changes. This mirrors the group-vs-individual reputation scoping in §6.2: the external world receives a coarse, permanent, group-level fact; the internal community receives a finer-grained, evolving, member-level one.
 
-**Revocation is asymmetric in effect, and the asymmetry is closed deliberately.** Write capability is intended to end at once — but under the append-only accumulator (§5.2) the leaf itself is not removed, so ending it requires the routine proof statement to establish currency, not only inclusion. That component is specified by proposal 0015 and not yet applied; until it is, this section's write-side guarantee is a stated intent rather than an enforced property. Read capability would not end on its own, since a revoked member already holds the current epoch's `K_tag_e` and the content keys gated alongside it (§6.4), and those are replaced only at an epoch boundary.
+**Revocation is asymmetric in effect, and both sides are closed deliberately.** Write capability ends because every routine proof must show the credential's leaf absent from the revocation set at the current epoch (§9.1); the leaf itself never leaves the accumulator (§5.2), and does not need to. Read capability ends through the tag-key broadcast: a revoked member already holds the current epoch's `K_tag_e` and the content keys gated alongside it (§6.4), and those are replaced only at an epoch boundary.
 
 Revocation therefore advances the epoch immediately rather than waiting for the schedule (§9.1). The new `K_tag` is broadcast to the remaining members, and the revoked credential receives nothing further. This is what makes the "prompt revocation" named below an available mitigation rather than one capped by the routine epoch interval. It closes future access only: content already resolved cannot be un-resolved, consistent with the absence of any cryptographic undo.
+
+The revocation set and the migration-spend set (§9.3) are served to members whole, member-gated like roots (§7), and non-membership witnesses are computed locally by each Persora. A witness request naming a specific leaf would disclose to Skiora exactly which credential is about to act; serving the full set is what keeps the request anonymous, and is affordable because both sets grow with revocations and migrations, never with membership or content.
 
 An early advance also expires any open policy proposal or vouch session (§4.3, §5.3). That is intended rather than incidental — the membership set has changed, so the quorum arithmetic has changed, and approvals cast in part by a now-revoked credential should not carry forward silently.
 

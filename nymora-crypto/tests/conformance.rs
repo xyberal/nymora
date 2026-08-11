@@ -188,6 +188,7 @@ fn every_vector_matches() {
                         ),
                         "migration" => nullifier::migration(
                             &CredentialKey::new(array(case, "key")),
+                            &Commitment::from_bytes(array(case, "leaf")),
                             &AgoraId::from_bytes(array(case, "agora_id")),
                         ),
                         other => panic!("no nullifier context `{other}`"),

@@ -18,7 +18,7 @@
 //! |---|---|---|
 //! | [`vouch`] | [`CredentialKey`] | A k-of-n admission threshold (§5.3) |
 //! | [`policy`] | [`CredentialKey`] | One approval per credential (§4.3) |
-//! | [`migration`] | [`CredentialKey`] | One successor per credential (§9.3) |
+//! | [`migration`] | [`CredentialKey`] | One successor per leaf (§9.3) |
 //! | [`attestation`] | [`EpochSecretKey`] | Nothing load-bearing — see below |
 //!
 //! The epoch key cannot serve a count, and not because epochs are short. Certifying an
@@ -42,7 +42,9 @@
 //! into another (§5.1, §6.1).
 
 use crate::algebraic::AlgebraicHasher;
-use nymora_core::{AgoraId, CredentialKey, Domain, EpochSecretKey, MessageHash, Nullifier};
+use nymora_core::{
+    AgoraId, Commitment, CredentialKey, Domain, EpochSecretKey, MessageHash, Nullifier,
+};
 
 /// Scopes one vouching attestation to one admission session (§5.3).
 ///
@@ -100,15 +102,23 @@ pub fn policy(key: &CredentialKey, proposal_id: &[u8], agora: &AgoraId) -> Nulli
 
 /// Consumes a credential's old leaf during device migration (§9.3).
 ///
-/// This is what stops a still-live old key from spawning more than one successor credential,
-/// so it must remain unique for the life of the credential. A leaf sits in the accumulator
-/// indefinitely, which is why migration was the first context to require the durable key —
-/// the others followed once it became clear the epoch key cannot support a count at all.
+/// This is what stops a still-live old key from spawning more than one successor from the
+/// same leaf, and — under §9.1's currency clauses — what a superseded device can no longer
+/// show unspent. A leaf sits in the accumulator indefinitely, which is why migration was the
+/// first context to require the durable key — the others followed once it became clear the
+/// epoch key cannot support a count at all.
+///
+/// The consumed leaf is bound in, not only the credential. `sk_cred` carries across the
+/// lineage deliberately (§9.3), so a derivation over the key alone would be constant for the
+/// credential's life: spent once at the first migration and colliding at every one after it,
+/// capping every credential at a single device change. Binding the leaf gives each migration
+/// its own spend while one leaf still admits exactly one successor.
 #[must_use]
-pub fn migration(key: &CredentialKey, agora: &AgoraId) -> Nullifier {
+pub fn migration(key: &CredentialKey, leaf: &Commitment, agora: &AgoraId) -> Nullifier {
     Nullifier::from_bytes(
         AlgebraicHasher::new(Domain::NullifierMigration)
             .absorb(key.expose())
+            .absorb(leaf.as_bytes())
             .absorb(agora.as_bytes())
             .finalize(),
     )
@@ -117,7 +127,7 @@ pub fn migration(key: &CredentialKey, agora: &AgoraId) -> Nullifier {
 #[cfg(test)]
 mod tests {
     use super::{attestation, migration, policy, vouch};
-    use nymora_core::{AgoraId, CredentialKey, EpochSecretKey, MessageHash};
+    use nymora_core::{AgoraId, Commitment, CredentialKey, EpochSecretKey, MessageHash};
 
     fn epoch_key(byte: u8) -> EpochSecretKey {
         EpochSecretKey::new([byte; 32])
@@ -137,6 +147,10 @@ mod tests {
 
     fn message(byte: u8) -> MessageHash {
         MessageHash::from_bytes([byte; 32])
+    }
+
+    fn leaf(byte: u8) -> Commitment {
+        Commitment::from_bytes([byte; 32])
     }
 
     #[test]
@@ -181,13 +195,28 @@ mod tests {
             vouch(&c, b"session"),
             attestation(&e, &message(0), &a),
             policy(&c, b"session", &a),
-            migration(&c, &a),
+            migration(&c, &leaf(0), &a),
         ];
         for (i, x) in all.iter().enumerate() {
             for y in &all[i + 1..] {
                 assert_ne!(x, y, "two nullifier contexts collided");
             }
         }
+    }
+
+    /// A lineage migrates more than once, and each migration is its own spend.
+    ///
+    /// `sk_cred` is constant across the lineage (§9.3), so a derivation over the key alone
+    /// would make the second planned migration reproduce the value the first already spent —
+    /// indistinguishable from a double-spend, and under §9.1's unspent clause it would brick
+    /// the successor outright.
+    #[test]
+    fn each_consumed_leaf_spends_its_own_nullifier() {
+        assert_ne!(
+            migration(&cred_key(1), &leaf(7), &agora(3)),
+            migration(&cred_key(1), &leaf(8), &agora(3)),
+            "two migrations of one lineage collided"
+        );
     }
 
     /// `vouch` and `policy` take caller-supplied identifiers of arbitrary length.
