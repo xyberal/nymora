@@ -57,6 +57,18 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   had silently capped the "prompt revocation" §11 relies on (proposal 0007).
 
 ### Fixed
+- Specification §11, §14: the per-attestation revocation-status endpoint is **removed as
+  contradictory**, not deferred. The private index it required — attestation nullifiers to
+  credential standing — is the exact knowledge §2.1 guarantees Skiora never holds, and no
+  cooperative substitute exists: re-proving authorship of a past-epoch bundle needs the
+  epoch key §9.1 destroys, which is §15's retroactive-unattributability guarantee working
+  as stated. Standing is checked where it has an answer — at the moment a credential acts
+  (§9.1) — and what a member can establish about older content is epoch-coarse and locally
+  computable: valid at its epoch, so-many revocations since, the author's membership among
+  them unknowable to anyone. The no-author-cooperation principle is rescoped to what it was
+  always about — revocation the mechanism, which needs no cooperation — rather than
+  mandating a query that has no author-independent answer and no author-dependent one
+  either (proposal 0016).
 - Specification §5.2, §9.1, §9.3, §10.1, §11: every routine proof must establish
   **currency**, not only inclusion — the credential's leaf absent from the revocation set
   and its migration nullifier unspent, proven as non-membership against two per-epoch

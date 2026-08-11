@@ -834,18 +834,14 @@ Revocation must remove a compromised member's standing without exposing their id
 1. **"Was this legitimately attested by a valid credential at the time?"** — a permanent historical fact. The original ZK proof cannot and should not be made to "stop being true" — it is a mathematical statement about the accumulator's state at a past epoch, unaffected by later events.
 2. **"Is the credential behind this attestation currently in good standing?"** — a dynamic, evolving fact, checked separately.
 
-```
-POST /agora/{agora_id}/attestation/revocation-status
-  auth: querying member's own credential proof
-  body: { nullifier }
-  → { author_status: "current" | "revoked" }
-```
+The second claim is checked where it has an answer: at the moment a credential acts. Every routine proof establishes currency against the current epoch's roots (§9.1), so no action by a revoked or superseded credential verifies. There is deliberately **no per-attestation standing query** — no interface answers "is the author of this bundle currently in good standing," because no party can answer it:
 
-This requires the Skiora to maintain a private internal index from attestation-nullifiers to current credential status — checkable without ever revealing which credential produced a given nullifier, only its present standing.
+- **Skiora cannot.** It never learns which credential produced a proof (§2.1), and an index from attestation nullifiers to credentials would *be* that knowledge — the per-member activity graph a compelled operator could be made to disclose. The index's nonexistence is load-bearing in the same way the registry's is (§3): what does not exist cannot be compelled.
+- **The author cannot.** Re-proving authorship of a past-epoch bundle requires that epoch's `sk_epoch`, destroyed when the epoch ended (§9.1). Retroactive unattributability of published content is a stated guarantee (§15), and recognition and linkability are the same property viewed from two angles (§6.1) — an answerable standing query would be that guarantee's negation.
 
-> **Flagged (proposal 0016, not yet applied):** the index above cannot be built. Skiora never learns which credential produced a proof (§2.1), and the author's own epoch key — the only other path to the linkage — is destroyed when its epoch ends (§9.1). Proposal 0016 removes this endpoint as contradictory rather than deferring it; until it is applied, treat this endpoint as specified-for-removal.
+What a member can establish about older content is epoch-coarse and computed locally, from material they already hold: the tag resolves the bundle's epoch *e* (§6.4); the attestation proves a credential was valid at *e*; the revocation set (§9.1) shows how many revocations have occurred since. Members weighing older content should weigh it in exactly those terms — *valid then, k revocations since, the author's membership among them unknowable* — rather than treating attestation as a claim about the present.
 
-**Scoping, by explicit design decision:** this status check is **internal-only**. It is never included in, or derivable from, anything shared outside the agora. Externally, the group's attestation remains permanent and unconditional — "the group vouched for this at the time" — regardless of later internal governance changes. This mirrors the group-vs-individual reputation scoping in §6.2: the external world receives a coarse, permanent, group-level fact; the internal community receives a finer-grained, evolving, member-level one.
+**External scoping is unchanged:** the group's attestation remains permanent and unconditional — "the group vouched for this at the time" — regardless of internal governance since. This mirrors the group-vs-individual reputation scoping in §6.2: the external world receives a coarse, permanent, group-level fact; internally, the finest claim available is the epoch-coarse one above.
 
 **Revocation is asymmetric in effect, and both sides are closed deliberately.** Write capability ends because every routine proof must show the credential's leaf absent from the revocation set at the current epoch (§9.1); the leaf itself never leaves the accumulator (§5.2), and does not need to. Read capability ends through the tag-key broadcast: a revoked member already holds the current epoch's `K_tag_e` and the content keys gated alongside it (§6.4), and those are replaced only at an epoch boundary.
 
@@ -857,7 +853,7 @@ An early advance also expires any open policy proposal or vouch session (§4.3, 
 
 **Consequence, stated plainly:** because external attestation is permanent and cannot be retroactively withdrawn, the group's external credibility is genuinely exposed to anything a member attested to before revocation. There is no cryptographic "undo" once content has propagated externally. The only real mitigations are upstream — careful vetting before admission, and fast internal detection leading to prompt revocation — not anything the protocol can clean up after the fact.
 
-**Why revocation cannot depend on author cooperation:** requiring authors to periodically "refresh" a liveness proof fails precisely in the case that matters — a revoked or compromised author has no incentive to cooperate, and if they could still produce a valid refresh, revocation would be meaningless. The status check must therefore be something the group determines independently of the author's cooperation.
+**Why revocation cannot depend on author cooperation:** it does not — currency is established inside every routine proof (§9.1), with no author-supplied refresh anywhere. That placement is forced, not stylistic: a revoked or compromised author has no incentive to cooperate, and a mechanism they could still satisfy would make revocation meaningless. The same reasoning is why the per-attestation query above is removed rather than answered by voluntary author proofs: cooperation could at most cover the current epoch's content, since older epoch keys no longer exist (§9.1), and an answer obtainable only from cooperating authors reads silence as guilt — punishing absence, not compromise.
 
 ---
 
@@ -904,7 +900,7 @@ Whoever operates a given agora's Skiora — self-hosted by the group, or a chose
 ## 14. Summary of Capabilities
 
 - **Membership**: Anonymous, threshold-vouched admission into tiered agoras, with zero-knowledge proofs verifying eligibility and credentials without revealing which specific member acted, bootstrapped from a single founder with no special-cased founding infrastructure.
-- **Content**: Authored content carries unlinkable, message-bound attestations proving "a real group member stands behind this" externally, while richer authorship/reliability tracking and revocation status remain visible only to members internally.
+- **Content**: Authored content carries unlinkable, message-bound attestations proving "a real group member stands behind this" externally, while richer authorship and reliability tracking remains a member-only concept — and standing is enforced at the moment of every action (§9.1, §11) rather than being queryable per past attestation.
 - **Governance**: Agoras mutate admission policy and thresholds at will via quorum, and can be permanently and verifiably dissolved through irreversible multi-party key destruction.
 - **Live authentication**: Two or more members actively communicating — over a network channel or in person — can mutually confirm, in real time, that everyone present holds a genuine, currently-valid credential and actually possesses its secret key, using a jointly-derived, replay-resistant session context and, for in-person settings, a human-verified short authentication string in place of network-channel binding.
 - **Key custody and continuity**: A root/epoch key hierarchy bounds the damage of routine compromise to a single epoch, hardware-backed authenticators protect the rarely-used root key against silent extraction, and dual migration/re-vouching paths let a member change devices with or without preserving reputation continuity, depending on whether their prior device remains reachable.

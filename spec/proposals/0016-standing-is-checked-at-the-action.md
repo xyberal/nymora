@@ -1,11 +1,16 @@
 # Proposal 0016 — Standing is checked at the action, never the artifact
 
-**Status:** **Proposed**
+**Status:** **Applied** — the sections below are now normative in the specification
 **Affects:** §11, §14
-**Depends on:** 0015 (Proposed) — checking currency at action time is what makes this
-removal safe; if 0015 is rejected, the replacement text below overstates what remains
+**Depends on:** 0015 (Applied) — checking currency at action time is what makes this
+removal safe
 **Corrects:** §11's specification of a private index from attestation nullifiers to
 credential status, and the scope of §11's no-author-cooperation principle
+
+> **Applied as drafted.** The interim flag placed on the endpoint when this was drafted is
+> absorbed by the replacement text. The two-claims framing stands unchanged; claim 2's
+> "checked separately" now resolves to the action-time check of §9.1 rather than to any
+> query.
 
 ---
 
