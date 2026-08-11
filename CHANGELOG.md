@@ -82,6 +82,15 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   had silently capped the "prompt revocation" §11 relies on (proposal 0007).
 
 ### Fixed
+- Specification §5.3: the vouch nullifier is **agora-scoped** —
+  `Hash(sk_cred, session_id, agora_id)`. It was the only count-nullifier that did not absorb
+  the agora, on the reasoning that a session identifier is already unique to the agora that
+  issued it — but session identifiers are issued by Skiora, an adversary in this threat model,
+  and two colluding Skioras can issue the same one. That left cross-agora distinctness resting
+  on key material having been correctly generated fresh per agora, the assumption proposal
+  0013 refused to rest on for commitments; the same defence-in-depth now holds for every
+  nullifier by construction. §5.3 and §6.5 also now reference §9.1's canonical proof statement
+  instead of restating pre-0008/0013 forms of it that had gone stale (proposal 0017).
 - Specification §11, §14: the per-attestation revocation-status endpoint is **removed as
   contradictory**, not deferred. The private index it required — attestation nullifiers to
   credential standing — is the exact knowledge §2.1 guarantees Skiora never holds, and no

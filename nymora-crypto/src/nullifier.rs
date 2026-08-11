@@ -37,9 +37,10 @@
 //!
 //! # Agora scoping
 //!
-//! Contexts that could otherwise collide across agoras absorb the [`AgoraId`], so that one
-//! member's actions in two agoras are unlinkable and a nullifier from one cannot be replayed
-//! into another (§5.1, §6.1).
+//! Every derivation absorbs the [`AgoraId`], so that one member's actions in two agoras are
+//! unlinkable and a nullifier from one cannot be replayed into another (§5.1, §6.1) — by
+//! construction, not because per-agora identifiers happen to be distinct or because key
+//! material was correctly generated fresh per agora (proposals 0013, 0017).
 
 use crate::algebraic::AlgebraicHasher;
 use nymora_core::{
@@ -52,14 +53,18 @@ use nymora_core::{
 /// the opaque identifier Skiora issues at `vouch/session/start`; it is absorbed as raw bytes
 /// and never interpreted here.
 ///
-/// This nullifier is not agora-scoped: a session identifier is already unique to the agora
-/// that issued it, and absorbing the `agora_id` alongside it would add nothing.
+/// The agora is absorbed even though a session identifier looks unique enough without it:
+/// session identifiers are issued by Skiora, an adversary in this threat model, and two
+/// colluding Skioras can issue the *same* one. Cross-agora distinctness must survive that and
+/// a key-generation bug reusing `sk_cred` across agoras — the defence-in-depth argument of
+/// proposal 0013, applied here by proposal 0017 — rather than rest on either being absent.
 #[must_use]
-pub fn vouch(key: &CredentialKey, session_id: &[u8]) -> Nullifier {
+pub fn vouch(key: &CredentialKey, session_id: &[u8], agora: &AgoraId) -> Nullifier {
     Nullifier::from_bytes(
         AlgebraicHasher::new(Domain::NullifierVouch)
             .absorb(key.expose())
             .absorb(session_id)
+            .absorb(agora.as_bytes())
             .finalize(),
     )
 }
@@ -192,7 +197,7 @@ mod tests {
     fn contexts_do_not_collide() {
         let (e, c, a) = (epoch_key(1), cred_key(1), agora(3));
         let all = [
-            vouch(&c, b"session"),
+            vouch(&c, b"session", &a),
             attestation(&e, &message(0), &a),
             policy(&c, b"session", &a),
             migration(&c, &leaf(0), &a),
@@ -222,7 +227,10 @@ mod tests {
     /// `vouch` and `policy` take caller-supplied identifiers of arbitrary length.
     #[test]
     fn identifier_boundaries_are_not_malleable() {
-        assert_ne!(vouch(&cred_key(1), b"ab"), vouch(&cred_key(1), b"a"));
+        assert_ne!(
+            vouch(&cred_key(1), b"ab", &agora(3)),
+            vouch(&cred_key(1), b"a", &agora(3))
+        );
         assert_ne!(
             policy(&cred_key(1), b"ab", &agora(3)),
             policy(&cred_key(1), b"a", &agora(3))

@@ -175,6 +175,7 @@ fn every_vector_matches() {
                         "vouch" => nullifier::vouch(
                             &CredentialKey::new(array(case, "key")),
                             &bytes(case, "scope"),
+                            &AgoraId::from_bytes(array(case, "agora_id")),
                         ),
                         "attestation" => nullifier::attestation(
                             &EpochSecretKey::new(array(case, "key")),

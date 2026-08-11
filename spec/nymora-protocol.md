@@ -250,13 +250,13 @@ POST /agora/{agora_id}/vouch/session/{id}/finalize
 
 A vouch session must finalize within the epoch in which it was opened; one that does not is abandoned rather than carried over. As with policy proposals (§4.3), this bounds how long an admission decision may accumulate attestations against a fixed threshold, rather than serving any property of the nullifier itself.
 
-Each attestation proof demonstrates, in zero knowledge:
+Each attestation proof establishes the full membership chain of §9.1 in zero knowledge, proven against `Root_voucher_eligible_{tier}`. That statement is normative in §9.1 and is not restated here; only its final clause varies by action. For vouching the final clause is:
 
 ```
-∃ sk, r, merkle_path such that:
-  Commit(sk, r) is a leaf in Root_voucher_eligible_{tier}
-  ∧ nullifier = Hash(sk, session_id)
+nullifier = Hash(sk_cred, session_id, agora_id)
 ```
+
+The nullifier derives from `sk_cred` because a threshold is a count, and a count cannot rest on a key its holder can mint twice (§9.1). It is agora-scoped even though a session identifier looks unique enough without it: session identifiers are issued by Skiora, and two colluding Skioras can issue the same one, so cross-agora distinctness must hold by construction rather than rest on the issuer being honest or on key material having been correctly generated fresh per agora (proposals 0013, 0017).
 
 **The "ring" of possible signers is never an explicit list transmitted anywhere** — it is implicitly defined by the accumulator's root. A verifier learns only that *some* valid leaf produced the proof.
 
@@ -366,10 +366,10 @@ Because tag keys are broadcast per epoch, ceasing to broadcast takes effect at t
 A fixed-shape, non-interactive zero-knowledge proof (e.g., Groth16/PLONK), using **one standardized circuit shared across every agora** — deliberately, so that proof size and structure never vary by agora, preventing proof-shape fingerprinting from correlating content back to a specific group.
 
 ```
-Statement proven:
-  ∃ sk, r, merkle_path such that:
-    Commit(sk, r) ∈ Root_{policy_class}
-    ∧ nullifier = Hash(sk, message_hash, agora_id)
+Statement proven: the full membership chain of §9.1, against Root_{policy_class}.
+That statement is normative in §9.1; only the final clause varies by action.
+For authorship:
+    nullifier = Hash(sk_epoch, message_hash, agora_id)
     ∧ Fiat-Shamir challenge incorporates message_hash
 ```
 
