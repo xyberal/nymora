@@ -527,8 +527,10 @@ The protocol in §8.1 assumes a network channel to bind `context_id` against. In
 **Local transport instead of network transport.** Commitments and reveals are exchanged Persora-to-Persora via QR code, NFC, or proximity-bounded Bluetooth rather than over a network:
 
 ```
-commit_i = Hash(nonce_i, blinding_i)   → displayed/scanned as QR or tapped via NFC
+commit_i — exactly as in §8.1 step 1   → displayed/scanned as QR or tapped via NFC
 ```
+
+The formula is not restated here: §8.1's is the only definition, and it carries the domain tag and length framing that a bare restatement would invite an implementer to drop.
 
 Every participant's Persora collects every other participant's commitment, then reveals follow the same way. `context_id` is derived identically to the network case — only the transport carrying the nonces changes.
 
@@ -647,7 +649,7 @@ This is acceptable because `r_root` authorizes nothing. Its sole function is to 
 graph TD
     HW["Hardware authenticator<br/>(secure enclave / FIDO2 key)<br/><i>§9.2 — non-exportable</i>"]
     HW -->|generates internally| SKR["sk_root<br/><i>used rarely: epoch certs,<br/>governance quorum actions</i>"]
-    SKR -->|derives| PKR["pk_root<br/><i>committed in accumulator:<br/>leaf = Commit(pk_root, sk_cred, r_root)</i>"]
+    SKR -->|derives| PKR["pk_root<br/><i>committed in accumulator:<br/>leaf = Commit(pk_root, sk_cred,<br/>r_root, agora_id)</i>"]
     SKR -->|"signs each epoch"| CERT["epoch_cert = Sign(sk_root,<br/>{epoch_number, pk_epoch})"]
 
     CERT -.->|"certifies"| SKE["sk_epoch + r_root + sk_cred<br/><i>epoch key generated fresh each epoch;<br/>r_root and sk_cred static, software-held;<br/>used for all routine ops</i>"]

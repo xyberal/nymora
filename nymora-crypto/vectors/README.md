@@ -30,6 +30,15 @@ What a provisional vector pins is the *shape*: the domain tag, the field order, 
 framing, and which value goes where. Those are settled, and getting them wrong is the failure
 these vectors exist to catch. The digest itself is not yet a commitment.
 
+## A note on the KDF
+
+The `kdf` construction is full HKDF-SHA256 — extract with the default zero-filled salt
+(`Hkdf::new(None, ikm)` in RustCrypto terms; a salt of `hashlen` zero bytes per RFC 5869
+§2.2), then expand. It is **not** expand-only over the raw input keying material; an
+implementation that skips extract derives different values and fails the vector. The `info`
+string is the domain tag and the context, each prefixed with its length as 8 little-endian
+bytes, concatenated in that order.
+
 ## A note on routing tags
 
 `tag` is the one construction here that absorbs no domain tag, and that is deliberate. HMAC

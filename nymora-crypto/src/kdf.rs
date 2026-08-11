@@ -5,11 +5,12 @@
 //! HKDF-SHA256, with the [`Domain`] tag and a caller-supplied context as `info`, both
 //! length-framed exactly as in [`crate::Hasher`].
 //!
-//! The extract step is skipped (no salt): every input keying material in this design is
-//! already a uniformly random secret rather than a password or a Diffie–Hellman output, so
-//! expansion alone is the right construction. HKDF is used in preference to a bare hash
-//! because hand-rolled key derivation is a standing audit finding even where it happens to
-//! be sound.
+//! Extract runs with the default zero-filled salt — `Hkdf::new(None, ikm)` — followed by
+//! expand; the full extract-then-expand pipeline is what the conformance vectors pin. No
+//! distinct salt is used because every input keying material in this design is already a
+//! uniformly random secret rather than a password or a Diffie–Hellman output. HKDF is used in
+//! preference to a bare hash because hand-rolled key derivation is a standing audit finding
+//! even where it happens to be sound.
 //!
 //! # What this is *not* used for
 //!

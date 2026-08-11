@@ -45,7 +45,7 @@ domains! {
     /// Derivation of an agora's self-generated identifier from its public parameters (§3).
     AgoraId => "nymora/v0/agora-id",
 
-    /// The accumulator leaf commitment, `Commit(pk_root, sk_cred, r_root)` (§9.1).
+    /// The accumulator leaf commitment, `Commit(pk_root, sk_cred, r_root, agora_id)` (§9.1).
     Commitment => "nymora/v0/commitment",
 
     /// Derivation of a policy class identifier from its agora and label (§5.2).

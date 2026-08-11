@@ -15,33 +15,6 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `ARCHITECTURE.md` describing the pure-engine-plus-ports model and crate graph.
 - Specification §16, Multi-Agora Membership, and a normative per-agora credential isolation
   requirement in §5.1 (proposal 0002).
-
-### Changed
-- Specification §9.1: the credential leaf commits to its agora —
-  `Commit(pk_root, sk_cred, r_root, agora_id)`. §5.1 already listed commitments among the
-  values that may not be derivable across agoras, and the construction did not comply; the
-  property held only because §5.1 separately requires fresh key material per agora, which is
-  a client behaving correctly rather than a construction making it so (proposal 0013).
-- Corroboration (§6.3) is **deferred** to a later protocol version; the external bundle
-  (§6.6) carries no `corroborations` array. The section remains specified, with a note that
-  reintroducing it reopens the nullifier decision below — it is not an isolated feature
-  (proposal 0006).
-- The personal receipt ledger and its enforcement (§10.2–§10.4) are **deferred** to a later
-  protocol version, and the pinned-heads bullet leaves the transparency log, which now
-  carries only aggregate, identity-free commitments. The mechanism was contradictory as
-  specified — §10.3's one-chain-per-credential enforcement requires exactly the credential
-  identification §10.4 makes uncomputable — and two of its three legs cannot be implemented
-  at all: a replay witness holds no verification key for any past-epoch entry, since
-  `pk_epoch` is never published and epoch keys are destroyed at epoch end; and
-  verifiably-random witness selection needs a randomness beacon and an anonymous unicast
-  channel the design does not have, then leaks membership size, which §5.2 forbids at any
-  point. §10.4's closing note records every obstacle plus the shape a viable reintroduction
-  takes — write-time completeness via linear head registration (proposal 0009, closed as
-  its prerequisite), self-verifying action artifacts instead of signatures, the member as
-  verifier — so whoever reopens the ledger starts from what can exist (proposals 0009,
-  0010).
-
-### Added
 - Canonical signed-payload encodings for the epoch certificate (§9.1) and the migration
   certificate (§9.3), in `nymora-core` alongside the bundle format. Both certificates are
   verified inside the standardized circuit, which makes the signed bytes wire format even
@@ -80,6 +53,31 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   immediately. §11 now states the revocation asymmetry it closes — write capability ends at
   once, while read capability would otherwise persist until the next tag-key broadcast, which
   had silently capped the "prompt revocation" §11 relies on (proposal 0007).
+
+### Changed
+- Specification §9.1: the credential leaf commits to its agora —
+  `Commit(pk_root, sk_cred, r_root, agora_id)`. §5.1 already listed commitments among the
+  values that may not be derivable across agoras, and the construction did not comply; the
+  property held only because §5.1 separately requires fresh key material per agora, which is
+  a client behaving correctly rather than a construction making it so (proposal 0013).
+- Corroboration (§6.3) is **deferred** to a later protocol version; the external bundle
+  (§6.6) carries no `corroborations` array. The section remains specified, with a note that
+  reintroducing it reopens the nullifier decision below — it is not an isolated feature
+  (proposal 0006).
+- The personal receipt ledger and its enforcement (§10.2–§10.4) are **deferred** to a later
+  protocol version, and the pinned-heads bullet leaves the transparency log, which now
+  carries only aggregate, identity-free commitments. The mechanism was contradictory as
+  specified — §10.3's one-chain-per-credential enforcement requires exactly the credential
+  identification §10.4 makes uncomputable — and two of its three legs cannot be implemented
+  at all: a replay witness holds no verification key for any past-epoch entry, since
+  `pk_epoch` is never published and epoch keys are destroyed at epoch end; and
+  verifiably-random witness selection needs a randomness beacon and an anonymous unicast
+  channel the design does not have, then leaks membership size, which §5.2 forbids at any
+  point. §10.4's closing note records every obstacle plus the shape a viable reintroduction
+  takes — write-time completeness via linear head registration (proposal 0009, closed as
+  its prerequisite), self-verifying action artifacts instead of signatures, the member as
+  verifier — so whoever reopens the ledger starts from what can exist (proposals 0009,
+  0010).
 
 ### Fixed
 - Specification §5.3: the vouch nullifier is **agora-scoped** —

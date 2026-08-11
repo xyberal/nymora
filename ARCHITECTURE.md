@@ -20,7 +20,7 @@ platform-specific. The core therefore cannot *contain* any of that.
 | Port | Host implements with | Covers |
 |---|---|---|
 | `KeyStore` | iOS Secure Enclave · Android StrongBox · CLI software · FIDO2 key | The credential's root authority: creating it, signing epoch certificates and migrations, and reporting what the backend can actually do (§9.2) |
-| `SecureStorage` | Platform keychain / encrypted store | `sk_epoch`, `r_root`, receipt ledger (§10.2), cached roots (§8.3) |
+| `SecureStorage` | Platform keychain / encrypted store | `sk_cred`, `r_root`, per-epoch `sk_epoch` and tag keys, cached roots (§8.3) |
 
 Keeping the engine pure is what makes it testable without mocks of the physical world, and
 what lets a single audited implementation serve every client — a security property in its
@@ -62,14 +62,15 @@ vector the design closes. A single core compiled to every target makes that unif
 structural.
 
 The same reasoning applies to nullifier derivation, Fiat–Shamir challenges, domain
-separation, and the `KDF(r_root, epoch)` chain (§9.1): these must agree bit-for-bit across
-every implementation or the protocol simply fails to interoperate.
+separation, and the canonical certificate payload encodings (§9.1, §9.3): these must agree
+bit-for-bit across every implementation or the protocol simply fails to interoperate.
 
 ## Crate graph
 
 ```
-nymora-core          types, wire formats, agora_id, errors
-   ├── nymora-crypto        BBS+, Poseidon, commitments, nullifiers, tags, KDF
+nymora-core          types, wire formats, domain registry, errors
+   ├── nymora-crypto        hashing (byte + provisional algebraic), commitments,
+   │                        nullifiers, tags, KDF, identifier derivations
    │      ├── nymora-accumulator    fixed-depth Merkle accumulator (§5.2)
    │      └── nymora-circuits       the one standardized ZK circuit (§6.5)
    │             └── nymora-proofs  attest / vouch / policy-check / live-auth
