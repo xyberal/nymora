@@ -31,6 +31,7 @@
 
 mod agora;
 mod bundle;
+mod certificate;
 mod digest;
 mod domain;
 mod epoch;
@@ -40,6 +41,7 @@ mod secret;
 
 pub use agora::{AgoraId, CeremonyMode, PublicParameters};
 pub use bundle::{Attestation, Bundle, FORMAT_VERSION};
+pub use certificate::{EpochCertPayload, MigrationCertPayload};
 pub use digest::{
     Commitment, LedgerHash, MessageHash, Nullifier, Root, SessionPseudonym, Tag, DIGEST_LEN,
 };

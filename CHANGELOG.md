@@ -28,6 +28,17 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (proposal 0006).
 
 ### Added
+- Canonical signed-payload encodings for the epoch certificate (§9.1) and the migration
+  certificate (§9.3), in `nymora-core` alongside the bundle format. Both certificates are
+  verified inside the standardized circuit, which makes the signed bytes wire format even
+  though neither certificate ever travels: a backend framing them differently would produce
+  proofs no other implementation can verify, or a per-backend proof shape — the §6.5
+  fingerprinting vector. Each encoding leads with its domain tag, separating the two
+  certificate kinds that share a signing key, and carries the `agora_id` inside the signed
+  message, so the no-replay-across-agoras requirement (§16.1) holds by construction. The
+  `KeyStore` port now takes the payload types and must sign exactly their canonical bytes;
+  the software stand-in streams them through the same encoder rather than restating the
+  layout.
 - Threat model §1, §15: an adversary who **retains extracted key material** after losing access
   to the device is now enumerated. §1 listed device seizure but said nothing about what survives
   it, and two of a credential's three secrets cannot be hardware-held at all — a value the

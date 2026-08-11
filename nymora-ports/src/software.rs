@@ -36,18 +36,24 @@
 //! registry, which is a worse trade than the few lines of framing below.
 //!
 //! The prefixes here are deliberately **not** shaped like `nymora/v0/...` protocol domain tags,
-//! so that no one mistakes one for the other.
+//! so that no one mistakes one for the other. Protocol tags do appear in what the signing
+//! methods absorb — but as part of the canonical certificate payloads from `nymora-core`,
+//! which are the message being signed, not this backend's own separation.
 
 use crate::key_store::{
-    Capabilities, EpochCertPayload, KeyStore, RootMaterialOut, RootMaterialWritten,
+    Capabilities, EpochCertPayload, KeyStore, MigrationCertPayload, RootMaterialOut,
+    RootMaterialWritten,
 };
 use nymora_core::{AgoraId, ProtocolError, SecretBytes, DIGEST_LEN};
 use sha2::{Digest, Sha256};
 
-/// Separators for this backend's three derivations. Local to it, not protocol domain tags.
+/// Separators for this backend's derivations. Local to it, not protocol domain tags.
+///
+/// The two signing methods absorb the canonical certificate payload, which already leads
+/// with a protocol domain tag, so a single local separator suffices there: the kinds are
+/// separated inside the message, exactly as they will be for a real signature scheme.
 const ROOT: &[u8] = b"software-key-store/v0/root";
-const EPOCH_CERT: &[u8] = b"software-key-store/v0/epoch-cert";
-const MIGRATION: &[u8] = b"software-key-store/v0/migration";
+const SIGN: &[u8] = b"software-key-store/v0/sign";
 
 /// Absorbs a length prefix before the bytes.
 ///
@@ -98,6 +104,26 @@ impl SoftwareKeyStore {
         }
         hasher.finalize().into()
     }
+
+    /// "Signs" a canonical certificate payload: a keyed hash over exactly its bytes.
+    ///
+    /// The payload is streamed through `encode_parts` rather than re-encoded here, so this
+    /// backend cannot drift from the layout `nymora-core` pins — the property the `KeyStore`
+    /// contract demands of real backends, obeyed by the stand-in for the same reason. The
+    /// framing prefix uses `encoded_len`, keeping the message one framed field like every
+    /// other absorption in this file.
+    fn sign_canonical(
+        &self,
+        encoded_len: usize,
+        encode_parts: impl FnOnce(&mut dyn FnMut(&[u8])),
+    ) -> [u8; DIGEST_LEN] {
+        let mut hasher = Sha256::new();
+        framed(&mut hasher, SIGN);
+        framed(&mut hasher, self.seed.expose());
+        hasher.update((encoded_len as u64).to_le_bytes());
+        encode_parts(&mut |part: &[u8]| hasher.update(part));
+        hasher.finalize().into()
+    }
 }
 
 impl KeyStore for SoftwareKeyStore {
@@ -128,30 +154,19 @@ impl KeyStore for SoftwareKeyStore {
 
     fn sign_epoch_cert(
         &self,
-        agora: AgoraId,
         payload: &EpochCertPayload<'_>,
         signature: &mut [u8],
     ) -> Result<usize, ProtocolError> {
-        // The agora is signed over, not merely used to select a key — see `KeyStore`. A
-        // certificate that omitted it would replay into another agora the member belongs to.
-        let value = self.derive(
-            EPOCH_CERT,
-            &[
-                agora.as_bytes(),
-                &payload.epoch.get().to_le_bytes(),
-                payload.epoch_public_key,
-            ],
-        );
+        let value = self.sign_canonical(payload.encoded_len(), |put| payload.encode_parts(put));
         put(signature, &value)
     }
 
     fn sign_migration(
         &self,
-        agora: AgoraId,
-        target: &[u8],
+        payload: &MigrationCertPayload<'_>,
         signature: &mut [u8],
     ) -> Result<usize, ProtocolError> {
-        let value = self.derive(MIGRATION, &[agora.as_bytes(), target]);
+        let value = self.sign_canonical(payload.encoded_len(), |put| payload.encode_parts(put));
         put(signature, &value)
     }
 }
@@ -159,7 +174,7 @@ impl KeyStore for SoftwareKeyStore {
 #[cfg(test)]
 mod tests {
     use super::SoftwareKeyStore;
-    use crate::key_store::{EpochCertPayload, KeyStore, RootMaterialOut};
+    use crate::key_store::{EpochCertPayload, KeyStore, MigrationCertPayload, RootMaterialOut};
     use nymora_core::{AgoraId, Epoch, ProtocolError, DIGEST_LEN};
     use std::format;
 
@@ -196,8 +211,8 @@ mod tests {
         let mut signature = [0u8; DIGEST_LEN];
         let written = store
             .sign_epoch_cert(
-                agora,
                 &EpochCertPayload {
+                    agora,
                     epoch: Epoch::new(epoch),
                     epoch_public_key: key,
                 },
@@ -211,7 +226,13 @@ mod tests {
     fn migration(store: &SoftwareKeyStore, agora: AgoraId, target: &[u8]) -> [u8; DIGEST_LEN] {
         let mut signature = [0u8; DIGEST_LEN];
         store
-            .sign_migration(agora, target, &mut signature)
+            .sign_migration(
+                &MigrationCertPayload {
+                    agora,
+                    successor_public_key: target,
+                },
+                &mut signature,
+            )
             .expect("buffer is large enough");
         signature
     }
@@ -266,8 +287,11 @@ mod tests {
 
     /// Each derivation must be separated from the others.
     ///
-    /// Without distinct separators, a root public key and a signature over the same agora would
-    /// be the same 32 bytes, and one could be presented as the other.
+    /// Root material is separated from signatures by the local separators; the two
+    /// certificate kinds are separated from each other by the protocol domain tag leading
+    /// each canonical payload — the same separation a real signature scheme will rely on.
+    /// Without either, two of these values over the same agora would be the same 32 bytes,
+    /// and one could be presented as the other.
     #[test]
     fn the_three_derivations_do_not_collide() {
         let store = store();
@@ -330,7 +354,13 @@ mod tests {
         let mut binding = [0u8; DIGEST_LEN];
 
         assert_eq!(
-            store.sign_migration(AGORA_A, &[], &mut too_small),
+            store.sign_migration(
+                &MigrationCertPayload {
+                    agora: AGORA_A,
+                    successor_public_key: &[],
+                },
+                &mut too_small,
+            ),
             Err(ProtocolError::Unavailable)
         );
         assert_eq!(

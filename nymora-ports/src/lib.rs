@@ -30,8 +30,10 @@
 //! Both ports carry requirements no signature can express, stated in their module
 //! documentation. The two easiest to violate without noticing:
 //!
-//! - **Every root signature must bind the agora it was made for** ([`key_store`]), or a
-//!   certificate is replayable into another agora the member belongs to (§16.1).
+//! - **Every root signature must cover exactly the canonical certificate payload**
+//!   ([`key_store`]) — the encoding from `nymora-core` carries the agora and the certificate
+//!   kind inside the signed message, so agora replay (§16.1) and cross-kind confusion are
+//!   closed by construction, but only for a backend that signs those bytes and nothing else.
 //! - **An `agora_id` must not become a visible storage label** ([`storage`]), or the store
 //!   discloses the existence of agoras that §3 keeps confidential.
 //!
@@ -50,7 +52,8 @@ pub mod software;
 pub mod storage;
 
 pub use key_store::{
-    Capabilities, EpochCertPayload, KeyStore, RootMaterialOut, RootMaterialWritten,
+    Capabilities, EpochCertPayload, KeyStore, MigrationCertPayload, RootMaterialOut,
+    RootMaterialWritten,
 };
 #[cfg(feature = "software-key-store")]
 pub use software::SoftwareKeyStore;

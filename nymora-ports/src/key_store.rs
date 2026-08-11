@@ -18,7 +18,9 @@
 //! `binding_cert` live entirely inside an implementation, and [`RootBinding`](self) carries the
 //! certificate as bytes this crate never parses.
 
-use nymora_core::{AgoraId, Epoch, ProtocolError};
+pub use nymora_core::{EpochCertPayload, MigrationCertPayload};
+
+use nymora_core::{AgoraId, ProtocolError};
 
 /// What a backend can actually do.
 ///
@@ -57,19 +59,6 @@ pub struct Capabilities {
     pub requires_user_presence: bool,
 }
 
-/// What a credential's root key certifies about an epoch key (§9.1).
-///
-/// The epoch key is **generated**, never derived (proposal 0004), so nothing about it is
-/// recomputable from the root key and this certificate is the only thing that ties the two
-/// together.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct EpochCertPayload<'a> {
-    /// The epoch the key is being certified for.
-    pub epoch: Epoch,
-    /// The freshly generated epoch public key, in whatever encoding the signature scheme uses.
-    pub epoch_public_key: &'a [u8],
-}
-
 /// Buffers a [`KeyStore`] writes newly created root material into.
 ///
 /// Both are caller-supplied because the sizes depend on a signature scheme this crate does not
@@ -96,13 +85,23 @@ pub struct RootMaterialWritten {
 
 /// A credential's root authority.
 ///
-/// # Every signature must bind the agora
+/// # Sign exactly the canonical bytes
 ///
-/// Each method takes an [`AgoraId`], and an implementation **must** include it in the signed
-/// message rather than treating it as a lookup key. A certificate that did not bind it would be
-/// replayable into another agora the member belongs to, which §16.1 forbids: no value derived
-/// within one agora may be usable in another. The parameter is not present so the backend can
-/// find the right key; it is present so the right agora is signed over.
+/// Both signing methods take a payload type from `nymora-core`, and an implementation **must**
+/// sign exactly its canonical encoding — [`EpochCertPayload::encode`] /
+/// [`MigrationCertPayload::encode`], or the identical byte sequence streamed through
+/// `encode_parts` — nothing more, nothing less, and never a layout of its own. Both
+/// certificates are recomputed and verified inside the standardized circuit (§6.5), so a
+/// backend with a private layout produces proofs no other implementation can verify, or a
+/// per-backend proof shape — the fingerprinting §6.5 exists to prevent.
+///
+/// The encoding carries the agora and the certificate kind's domain tag inside the signed
+/// message, so the two properties earlier revisions of this trait could only exhort —
+/// no replay into another agora the member belongs to (§16.1), and no confusion between the
+/// two certificate kinds sharing one signing key — hold by construction for any backend
+/// that follows the rule above. `agora` still appears as a parameter on
+/// [`create_root`](KeyStore::create_root), where there is no payload; the signing methods
+/// read it from the payload itself.
 ///
 /// # Errors
 ///
@@ -131,35 +130,36 @@ pub trait KeyStore {
 
     /// Signs a certificate binding a generated epoch key to this credential (§9.1).
     ///
-    /// Returns the number of bytes written to `signature`.
+    /// The signed message is exactly the payload's canonical encoding — see the trait
+    /// documentation. Returns the number of bytes written to `signature`.
     ///
     /// # Errors
     ///
     /// See the trait documentation.
     fn sign_epoch_cert(
         &self,
-        agora: AgoraId,
         payload: &EpochCertPayload<'_>,
         signature: &mut [u8],
     ) -> Result<usize, ProtocolError>;
 
-    /// Signs a one-time certificate authorizing migration to `target` (§9.3).
+    /// Signs a one-time certificate authorizing migration to a successor key (§9.3).
     ///
-    /// `target` is the successor's root public key, in the same encoding
-    /// [`create_root`](KeyStore::create_root) produces. Returns the number of bytes written to
-    /// `signature`.
+    /// The successor's public key is in the same encoding
+    /// [`create_root`](KeyStore::create_root) produces, and the signed message is exactly the
+    /// payload's canonical encoding — see the trait documentation. Returns the number of bytes
+    /// written to `signature`.
     ///
     /// The protocol requires this to be usable once: the old leaf is consumed by a migration
-    /// nullifier derived from `sk_cred`, so a second successor cannot be admitted even if a
-    /// backend signs a second certificate. Enforcement lives in the accumulator, not here.
+    /// nullifier derived from `sk_cred` and the leaf itself, so a second successor cannot be
+    /// admitted even if a backend signs a second certificate. Enforcement lives in the
+    /// accumulator, not here.
     ///
     /// # Errors
     ///
     /// See the trait documentation.
     fn sign_migration(
         &self,
-        agora: AgoraId,
-        target: &[u8],
+        payload: &MigrationCertPayload<'_>,
         signature: &mut [u8],
     ) -> Result<usize, ProtocolError>;
 }
@@ -167,7 +167,7 @@ pub trait KeyStore {
 #[cfg(test)]
 mod tests {
     use super::{Capabilities, EpochCertPayload, KeyStore};
-    use nymora_core::Epoch;
+    use nymora_core::{AgoraId, Epoch};
 
     /// A host may hold this port behind a trait object; keep it dyn-compatible.
     fn _is_dyn_compatible(_: &dyn KeyStore) {}
@@ -181,22 +181,32 @@ mod tests {
         assert!(!claimed.requires_user_presence);
     }
 
-    /// The payload carries the epoch explicitly rather than leaving it implicit in the key.
+    /// The payload carries the epoch and agora explicitly rather than leaving either
+    /// implicit in the key.
     ///
-    /// A certificate that did not name its epoch would verify in any epoch, which is the
-    /// forward-secrecy bound of §9.1 expressed as a signed field.
+    /// A certificate that did not name its epoch would verify in any epoch — the
+    /// forward-secrecy bound of §9.1 expressed as a signed field — and one that did not name
+    /// its agora would replay into another (§16.1). The canonical encoding these feed is
+    /// pinned in `nymora-core`.
     #[test]
-    fn an_epoch_cert_names_its_epoch() {
+    fn an_epoch_cert_names_its_epoch_and_agora() {
         let payload = EpochCertPayload {
+            agora: AgoraId::from_bytes([0x11; 32]),
             epoch: Epoch::new(7),
             epoch_public_key: &[0xab; 32],
         };
-        assert_eq!(payload.epoch, Epoch::new(7));
         assert_ne!(
             payload,
             EpochCertPayload {
                 epoch: Epoch::new(8),
-                epoch_public_key: &[0xab; 32],
+                ..payload
+            }
+        );
+        assert_ne!(
+            payload,
+            EpochCertPayload {
+                agora: AgoraId::from_bytes([0x12; 32]),
+                ..payload
             }
         );
     }

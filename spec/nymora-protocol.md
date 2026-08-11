@@ -586,6 +586,8 @@ The `agora_id` is not secret to the parties who hold this leaf and adds no hidin
 epoch_cert = Sign(sk_root, {epoch_number, pk_epoch})
 ```
 
+**The signed message is canonical, and normative:** the domain tag `nymora/v0/epoch-cert`, the `agora_id`, the epoch number (u64, little-endian), and `pk_epoch`, in that order, each field length-framed as in §6.6. The certificate is verified inside the standardized circuit (§6.5), which makes these bytes wire format even though the certificate itself never travels: an implementation framing them differently produces proofs no other implementation can verify — or, worse, a per-client proof shape, the fingerprinting §6.5 exists to prevent. The agora sits inside the signed message, not merely alongside the signing request, so an epoch certificate cannot be replayed into another agora the member belongs to (§16.1); the leading domain tag is what keeps this certificate and the migration certificate (§9.3) unforgeable for each other despite sharing a signing key.
+
 **Epoch keys are generated, never derived.** Each epoch's `sk_epoch` is sampled independently from the device's cryptographically secure random source. It is never computed from `sk_root`, from `r_root`, from a recovery seed, or from the preceding epoch's key — including by a one-way ratchet. `epoch_cert` is what makes a freshly generated key valid; derivation is not a shortcut for that step but a defeat of it. Deriving from long-lived material would let anyone who later obtains that material recompute every past epoch key, and with them every past nullifier, retroactively linking activity that the epoch structure exists to keep separate; deriving from the previous epoch's key would let a single epoch's compromise extend to every epoch after it, silently re-certified by the member's own honest rollover.
 
 The corollary is a deletion requirement, and its trigger is the clock rather than the rollover: when an epoch ends, that epoch's key is destroyed, whether or not a successor has been certified. Forward secrecy across epochs rests on that deletion, not on the derivation structure — there is none.
@@ -708,6 +710,8 @@ New device: generates a fresh (sk_root_new, r_root_new, pk_root_new) internally,
 POST /agora/{agora_id}/credentials/migrate
   body: { migration_cert, new_commitment: Commit(pk_root_new, sk_cred, r_root_new) }
 ```
+
+The migration certificate's signed message is canonical for the same reason the epoch certificate's is (§9.1): the domain tag `nymora/v0/migration-cert`, the `agora_id`, and `pk_root_new`, in that order, each field length-framed as in §6.6. It is verified inside a proof, so the bytes must agree between every implementation and the circuit.
 
 The migration is verified (ideally itself wrapped in a ZK proof rather than transmitted with `pk_root_old` in the clear, consistent with this design's general avoidance of exposing linkable identifiers) against the old, still-valid leaf. On success, the agora's accumulator attributes — tenure, vouch count, tier — carry over to the new leaf, and the old leaf is consumed via a migration-specific nullifier, preventing a still-live old key from being used to spawn more than one successor credential.
 
