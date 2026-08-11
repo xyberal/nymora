@@ -68,7 +68,7 @@ fn framed(hasher: &mut Sha256, bytes: &[u8]) {
 /// Writes `value` into `out`, or reports that the caller's buffer is too small.
 fn put(out: &mut [u8], value: &[u8; DIGEST_LEN]) -> Result<usize, ProtocolError> {
     out.get_mut(..DIGEST_LEN)
-        .ok_or(ProtocolError::Unavailable)?
+        .ok_or(ProtocolError::Malformed)?
         .copy_from_slice(value);
     Ok(DIGEST_LEN)
 }
@@ -346,7 +346,8 @@ mod tests {
         );
     }
 
-    /// A buffer too small is the caller's own error, and the port reports it as operational.
+    /// A buffer too small is the caller's own input error, not an operational condition —
+    /// the same mapping `SecureStorage` and the bundle codec use.
     #[test]
     fn a_short_buffer_is_refused() {
         let store = store();
@@ -361,7 +362,7 @@ mod tests {
                 },
                 &mut too_small,
             ),
-            Err(ProtocolError::Unavailable)
+            Err(ProtocolError::Malformed)
         );
         assert_eq!(
             store
@@ -373,7 +374,7 @@ mod tests {
                     },
                 )
                 .unwrap_err(),
-            ProtocolError::Unavailable
+            ProtocolError::Malformed
         );
     }
 

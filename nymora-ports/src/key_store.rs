@@ -106,7 +106,10 @@ pub struct RootMaterialWritten {
 /// # Errors
 ///
 /// [`ProtocolError::Unavailable`] where the backend could not act — no such key, hardware
-/// absent, the user declined a presence check, or a buffer too small to hold the result.
+/// absent, the user declined a presence check. [`ProtocolError::Malformed`] where the caller's
+/// buffer is too small to hold the result: that is a property of the caller's own input, not
+/// an operational condition — retrying it cannot succeed — and it is the same mapping
+/// `SecureStorage` and the bundle codec use for the same mistake.
 /// [`ProtocolError::Rejected`] is not used here: this port has no counterparty and no hidden
 /// protocol state to protect, so there is nothing for a coarse refusal to conceal.
 pub trait KeyStore {

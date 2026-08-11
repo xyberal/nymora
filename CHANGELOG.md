@@ -78,6 +78,10 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   its prerequisite), self-verifying action artifacts instead of signatures, the member as
   verifier — so whoever reopens the ledger starts from what can exist (proposals 0009,
   0010).
+- `KeyStore` reports a too-small caller buffer as `ProtocolError::Malformed` rather than
+  `Unavailable`, matching `SecureStorage` and the bundle codec: buffer size is a property of
+  the caller's own input, not an operational condition, and retrying it cannot succeed —
+  which is what `Unavailable` would imply.
 
 ### Fixed
 - Specification §5.3: the vouch nullifier is **agora-scoped** —
