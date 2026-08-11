@@ -23,6 +23,31 @@
 //! number of agoras where the platform allows otherwise. This crate cannot enforce either; it
 //! has no hash and takes no cryptographic dependency. It is stated here because the port is
 //! where a host implementer will look.
+//!
+//! # The durable slots must not ride along in a backup
+//!
+//! [`Slot::CredentialKey`] and [`Slot::RootOpening`] live for the credential's life, and a
+//! backup copy is the cheapest acquisition path for the §15 durable-key adversary (proposal
+//! 0011): those two values alone — no device, no `sk_root` — recompute every vouching,
+//! policy, and migration nullifier the credential ever made, and escaping that costs a full
+//! Path 2 revocation. Implementations must keep the durable slots in the platform secret
+//! store, never in flat files, and set whatever sync- and backup-exclusion attributes the
+//! platform defines — so that any copy an ambient backup sweeps anyway is at worst ciphertext
+//! under a credential the adversary must separately obtain. What remains — user-driven backup
+//! jobs, disk snapshots, a home directory kept in a dotfiles repository — no implementation
+//! can see, and is the embedding client's obligation to surface to the member.
+//!
+//! This is deliberately a contract, not a reported capability. A `Capabilities`-style report
+//! was considered and refused: `KeyStore` reports because its backends legitimately vary and
+//! its central claim carries evidence a verifier can check, while a storage implementation
+//! reporting on its own conduct is assertion without an evidence channel — the
+//! implementation that misconfigured backup exclusion is the one that reports it correct in
+//! good faith. On desktop platforms the bit is not even knowable, since exclusion there is a
+//! property of the member's backup regime rather than of the store. And nothing
+//! protocol-side could act on the value: Skiora never sees a member's storage, which is by
+//! design. Every obligation on this port follows the same rule — destroy-not-unlink,
+//! authenticate-not-just-encrypt, opaque labels — and a new reported capability here should
+//! have to argue against it.
 
 use nymora_core::{AgoraId, Epoch, PolicyClass, ProtocolError};
 
