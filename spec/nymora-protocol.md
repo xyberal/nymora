@@ -36,8 +36,8 @@ Read alongside:
 | **Nullifier** | A per-context deterministic hash derived from a member's secret key, used to enforce distinctness (no double-vouching, no double-attesting) without revealing identity. |
 | **Attestation** | A zero-knowledge proof that a valid credential authored a specific piece of content. |
 | **Tag** | An opaque routing value letting a member locate which agora/epoch a piece of content belongs to, without transmitting the agora's identity in the clear. |
-| **Transparency log** | An optional, per-agora, independently-replicated append-only log of identity-free state commitments (roots, policy changes, revocation-set root, pinned ledger heads), enabling any outside party to verify the machinery is run honestly without membership or identity access. |
-| **Receipt ledger** | A per-credential hash-chained, append-only record of every action one credential takes within one agora, replayable by another Persora to confirm that history is complete, consistent, and non-forged. A member holding credentials in several agoras keeps a separate, unlinked ledger for each. |
+| **Transparency log** | An optional, per-agora, independently-replicated append-only log of identity-free state commitments (roots, policy changes, exclusion roots), enabling any outside party to verify the machinery is run honestly without membership or identity access. |
+| **Receipt ledger** | *Deferred (§10.2, proposal 0010).* A per-credential hash-chained, append-only record of every action one credential takes within one agora, replayable by another Persora to confirm that history is complete, consistent, and non-forged. |
 
 ### 2.1 System relationships
 
@@ -747,15 +747,14 @@ flowchart TD
 
 ## 10. Integrity and Auditability
 
-The mechanisms so far protect against forged proofs and identity disclosure, but they do not, on their own, defend against two distinct classes of *rogue-actor* behavior: a **rogue Skiora** that silently rewrites or forks its aggregate state, and a **rogue Persora** that abuses its own valid credential or misrepresents its own history. These are separate trust boundaries and require separate mechanisms. This section defines three composing layers, each covering the party the layer below it must otherwise trust.
+The mechanisms so far protect against forged proofs and identity disclosure, but they do not, on their own, defend against a **rogue Skiora** that silently rewrites or forks its aggregate state. This section defines the layer that covers it.
 
 | Threat | Covered by |
 |---|---|
 | Rogue **Skiora** silently rewrites, rolls back, or forks aggregate state | §10.1 Per-agora transparency log |
-| Rogue **Persora** hides, denies, or forks its own action history | §10.2 Personal receipt ledger + §10.3 head-pinning |
-| Rogue **Skiora** secretly *permits* a Persora to fork its ledger | §10.1 (pinned heads are publicly checkpointed) |
+| Rogue **Persora** hides, denies, or forks its own action history | *Deferred* — §10.2–§10.4 (proposal 0010) |
 
-None of these *prevent* a compromised client from taking a valid-but-unwanted action in the moment — that prevention belongs to hardware-bound authorization (§9.2) and structural server-side enforcement (§5.3). What this section adds is that such actions cannot afterward be **hidden, denied, or misrepresented**, and that a rogue operator cannot silently corrupt the shared state without public detection.
+A rogue **Persora** — one that abuses its own valid credential or misrepresents its own history — is a separate trust boundary, addressed by the deferred sections below. Nothing here *prevents* a compromised client from taking a valid-but-unwanted action in the moment; that prevention belongs to hardware-bound authorization (§9.2) and structural server-side enforcement (§5.3). What this section adds is that a rogue operator cannot silently corrupt the shared state without public detection.
 
 ### 10.1 Per-agora transparency log
 
@@ -765,10 +764,11 @@ Each agora optionally publishes its integrity-critical state commitments to an *
 - the sequence of accumulator roots per epoch (`Root_tier2_epoch_0, Root_tier2_epoch_1, …`) — already just hashes that reveal nothing about membership (§5.2);
 - signed tree heads making the root sequence itself an append-only Merkle log, so a published root cannot later be swapped or deleted without breaking the log's hash chain;
 - policy-change events (§5.3) as committed entries — *that* a policy changed at a given epoch, never who voted;
-- the revocation-set root (§11) and the migration-spend root (§9.3) — the two exclusion roots every routine proof proves non-membership against — so exclusion state is publicly consistent and cannot be forked per member;
-- pinned per-credential ledger heads (§10.3), so a rogue Skiora cannot secretly permit a client to fork its personal ledger.
+- the revocation-set root (§11) and the migration-spend root (§9.3) — the two exclusion roots every routine proof proves non-membership against — so exclusion state is publicly consistent and cannot be forked per member.
 
 **Never on the log:** nullifiers, attestation bundles, content, tags, individual membership commitments, or verification receipts tied to members. The line is aggregate, identity-free state commitments only; anything per-action or per-member stays off.
+
+The rule behind that list: **a value derived from a durable secret may be revealed to Skiora, but must never be published here.** Skiora sees such a value once and holds it under its own access controls; the log is public, permanent, replicated, and undeletable, so anything on it is available to every future adversary who ever obtains the key. A per-member value that is deterministic in a durable secret turns the log into a lookup table for that member's activity, retroactively and prospectively, the moment the secret leaks. This is why §10.3's pinned-heads bullet was struck from the list above rather than reworded (proposal 0010), and the constraint any future reintroduction must satisfy.
 
 **What an independent auditor can verify** (holding only the public log):
 1. **Non-equivocation** — Skiora serves one linear history, not a secretly forked view showing different roots to different members (a split-view attack).
@@ -783,7 +783,9 @@ The auditor learns *that the machinery is honest*, and nothing about membership,
 
 **Existence-privacy tradeoff:** publishing per-agora roots reveals that an agora exists and its rough activity cadence, which conflicts with §3's existence-hiding. The transparency log is therefore **opt-in per agora** — appropriate for agoras that prioritize provable honesty over hiding their own existence, and declined by agoras that need maximal existence-privacy. Where existence-privacy matters but some auditability is still wanted, roots may be pooled across agoras without per-agora labels, letting an auditor confirm the pooled log is append-only and consistent without isolating one agora's history.
 
-### 10.2 Personal receipt ledger
+### 10.2 Personal receipt ledger — deferred
+
+**Deferred to a later protocol version (proposal 0010).** The mechanism below is specified but not implemented, together with §10.3 and §10.4. Read the note at the end of §10.4 before reintroducing it: the ledger cannot be re-added without also settling how its pinning handle is derived, how a replay witness verifies entries whose signing keys no longer exist, and the obvious answers to both are not free.
 
 Each Persora maintains a **hash-chained, append-only ledger of every action its credential takes** — vouching, attestation, verification, governance participation. Each entry commits to the previous one, making the whole history tamper-evident:
 
@@ -807,7 +809,9 @@ The ledger records abuse faithfully; it does not prevent it. A compromised Perso
 
 **One ledger per credential, never one per person.** A member in several agoras maintains a separate chain for each, and a replay witness sees only the chain for the agora it was asked about. A single ledger spanning a member's agoras would hand any witness — including a verifiably-randomly selected one (§10.4) — the member's full cross-agora activity, and with it the fact that those memberships share an owner. The witness learns that some credential's history is consistent; it learns nothing about any other agora, and cannot tell whether the member belongs to any.
 
-### 10.3 Enforced logging and head-pinning
+### 10.3 Enforced logging and head-pinning — deferred
+
+**Deferred with §10.2 (proposal 0010).** As written this section overstates what it delivers: it claims one chain per credential, while §10.4 guarantees Skiora cannot identify a credential. See §10.4's closing note.
 
 A tamper-evident chain only proves the entries *in it* are consistent; it says nothing about entries never written. A rogue Persora could therefore keep two sets of books — a clean "show" ledger and a real hidden one — unless logging is *enforced*. Skiora provides that enforcement:
 
@@ -820,7 +824,9 @@ Because head-pinning relies on Skiora following the "one non-forked chain per cr
 - **Skiora head-pinning** → a client cannot keep secret books or fork.
 - **Transparency log** → a rogue Skiora cannot secretly permit a fork.
 
-### 10.4 Keeping the ledger from becoming an activity graph
+### 10.4 Keeping the ledger from becoming an activity graph — deferred
+
+**Deferred with §10.2 (proposal 0010).**
 
 A per-credential chain that Skiora pins, with heads published to a log, risks becoming exactly the per-member activity graph the rest of the design avoids — "this credential took 47 actions at these epochs" is a linkable profile even without a name attached. Two constraints keep it private:
 
@@ -828,6 +834,24 @@ A per-credential chain that Skiora pins, with heads published to a log, risks be
 - **The ledger contents are holder-only.** The full receipt ledger is replayed by a second Persora the member chooses or that is verifiably-randomly selected (see selection below) — it is never handed to Skiora in full. Skiora sees head commitments; it never sees the actions those heads summarize.
 
 **Verifiably-random selection of a replay-witness.** When a replay check is triggered rather than member-initiated, the second Persora must not be chosen at Skiora's discretion — a rogue Skiora would route checks to a colluding client, and selection would leak "this member was asked to re-verify at this time." Instead, selection uses public randomness Skiora cannot bias (the jointly-derived-randomness primitive from §8.1), and the selected witness proves in zero knowledge that it is the member the randomness selected, without revealing which member that is. Because verification and ledger-replay are deterministic, a disagreement between two witnesses is not resolved by voting but by **recomputation** — any honest party re-runs the deterministic check against the logged root, and the witness whose result does not match is the faulty one. The value of a second witness is catching a client that lies about a reproducible computation, not manufacturing consensus.
+
+---
+
+**Reintroducing §10.2–§10.4 requires settling the pinning handle first.** The handle's derivation is unspecified in the text above, and it is load-bearing rather than incidental. Nothing in §10.3 limits a credential to one handle per epoch, so a member may register two and keep two chains without waiting for a boundary; across a boundary, rotation leaves Skiora with no last-recorded head to compare a new chain against. §10.3's non-forkable claim therefore holds at no scope as written.
+
+Wording cannot repair it. Verifying that two handles belong to one credential *is* the capability to link a credential's epochs, so Skiora cannot be granted the enforcement without the surveillance §10.4 exists to prevent. The two known repairs both carry real cost: deriving the handle from a durable secret makes the public log a permanent activity lookup for anyone who later obtains that secret (see §10.1's rule, and §15's durable-key adversary); consuming the previous head as a linear resource — proposal 0009 — works, but needs a second accumulator, a membership proof from every active member at every boundary, and leaves a member who loses chain state unable to act at all.
+
+A third direction is unexplored: a handle key that evolves one-way per epoch, deleted as it advances, so the published value is a function of nothing durable. It closes retroactive linkage without an accumulator, at the cost of proving the iteration in-circuit and of a recovery story for the seed.
+
+**Replay verification has no verification key.** §10.2 signs each entry with `Sign(sk_epoch, …)` and asks a replay witness to check every signature. `pk_epoch` is a private witness that is never published (§9.1), `epoch_cert` never leaves the device, and past epoch keys are destroyed when their epoch ends — so a witness holds no verification key for any entry older than the current epoch, and mandating key retention to fix it would trade away the forward secrecy the destruction exists to provide (§9.1, §15). The signature is also the wrong tool: the actions a ledger records already produce self-verifying artifacts — proof, nullifier, message hash — that verify against their epoch's roots indefinitely (§11's first claim), with no key to retain.
+
+**The replay-witness mechanism needs more than a handle.** Settling the pinning question would still leave this section unimplementable, because it rests on two primitives the design does not provide. Selection needs public randomness no party can bias over an anonymous membership that is not simultaneously online — a beacon, not the commit-reveal of §8.1, which this section cites and which requires a known participant set on a live channel. Delivery needs a private message to a counterparty who is anonymous by construction, and §6.4's tags route to an agora by broadcast rather than to a member.
+
+Selection also discloses membership size. Any sampling of the membership has an observable response rate, and response rate against selection probability yields the count that §5.2 withholds "at any point" — a property of sampling rather than of any particular construction, so it does not yield to a better one. And the full ledger goes to whoever is selected, which in the verifiably-random case is a member the holder did not choose and §1 allows to be an infiltrator.
+
+Two corrections for whoever picks this up: recomputation does not resolve a disagreement between witnesses shown *different* ledgers — both recompute correctly, and the faulty party is the holder, not a witness — and a selected member who simply does not reply is indistinguishable from one never selected, so the check is unenforceable as described.
+
+**What a reintroduction that can exist looks like.** Completeness must come from write-time construction, not after-the-fact audit: Skiora refuses any action that does not extend the chain, with head registration consuming the previous head as a linear resource (proposal 0009) so that one chain per credential holds by induction and nobody ever verifies completeness at all — necessarily, since verifying the completeness of a member's history is the same capability as attributing their whole activity. Entries carry the self-verifying action artifacts rather than signatures. The verifier is the member themselves — the next device, holding `sk_cred`, replaying the chain against the pinned head — plus any witness the member chooses to invite; mandated third-party audit is the part that cannot return. And one price to state up front: write-time enforcement hands Skiora a within-epoch thread of the credential's actions that nullifiers alone never gave it, bounded to one epoch by handle rotation.
 
 ## 11. Revocation
 
@@ -908,7 +932,7 @@ Whoever operates a given agora's Skiora — self-hosted by the group, or a chose
 - **Governance**: Agoras mutate admission policy and thresholds at will via quorum, and can be permanently and verifiably dissolved through irreversible multi-party key destruction.
 - **Live authentication**: Two or more members actively communicating — over a network channel or in person — can mutually confirm, in real time, that everyone present holds a genuine, currently-valid credential and actually possesses its secret key, using a jointly-derived, replay-resistant session context and, for in-person settings, a human-verified short authentication string in place of network-channel binding.
 - **Key custody and continuity**: A root/epoch key hierarchy bounds the damage of routine compromise to a single epoch, hardware-backed authenticators protect the rarely-used root key against silent extraction, and dual migration/re-vouching paths let a member change devices with or without preserving reputation continuity, depending on whether their prior device remains reachable.
-- **Integrity and auditability**: An optional per-agora append-only transparency log lets any independent outside party verify the machinery is run honestly — non-equivocation, append-only integrity, and protocol conformance — without any membership or identity access; per-credential hash-chained receipt ledgers, with enforced logging and publicly-checkpointed head-pinning, make a rogue client's own action history complete, non-forkable, and independently replayable, so client misbehavior cannot be hidden or denied even though it cannot always be prevented.
+- **Integrity and auditability**: An optional per-agora append-only transparency log lets any independent outside party verify the machinery is run honestly — non-equivocation, append-only integrity, and protocol conformance — without any membership or identity access. Detection of a rogue *client's* misbehaviour is deferred with §10.2 (proposal 0010).
 - **Multi-agora membership**: One Persora may hold credentials in any number of agoras, each a separate cryptographic domain sharing no key material and no derived value, so that no agora — and no observer — learns that a member belongs to any other.
 
 

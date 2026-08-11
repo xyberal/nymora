@@ -1,9 +1,18 @@
 # Proposal 0009 — Make the ledger head a linear resource
 
-**Status:** **Proposed**
+**Status:** **Closed — superseded by 0010**, which defers the mechanism this repairs
 **Affects:** §9.3, §10.3, §10.4
 **Depends on:** 0008, which is what exposes the gap — see below
 **Corrects:** §10.3's claim that head-pinning makes the ledger "non-forkable"
+
+> **Closed without application, not discarded.** Proposal 0010 deferred §10.2–§10.4, and
+> this construction went with them — as their reintroduction prerequisite: §10.4's closing
+> note names linear-head registration as what makes one-chain-per-credential hold by
+> induction if the ledger returns, with entries carrying self-verifying action artifacts
+> rather than signatures and the member as the verifier. The open recovery question below
+> closed with the deferral, and 0010 records why it was never answerable: recoverability
+> from durable secrets and unlinkability against durable secrets are the same statement
+> with opposite signs.
 
 ---
 

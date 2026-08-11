@@ -119,9 +119,15 @@ domains! {
     TagRouting => "nymora/v0/tag/routing",
 
     /// An entry in a credential's receipt ledger (§10.2).
+    ///
+    /// Reserved: the ledger is deferred (proposal 0010). The tag stays because this registry
+    /// is permanent — removing and later re-adding one would be indistinguishable from a
+    /// redefinition.
     LedgerEntry => "nymora/v0/ledger/entry",
 
     /// The unlinkable per-epoch handle under which Skiora pins a ledger head (§10.4).
+    ///
+    /// Reserved: deferred with the ledger (proposal 0010).
     LedgerHeadHandle => "nymora/v0/ledger/head-handle",
 }
 

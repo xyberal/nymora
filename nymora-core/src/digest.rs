@@ -84,6 +84,8 @@ digest_newtype! {
     SessionPseudonym,
 
     /// An entry in a credential's hash-chained receipt ledger (§10.2).
+    ///
+    /// Reserved: the ledger is deferred (proposal 0010); the type stays with its domain tags.
     LedgerHash,
 }
 

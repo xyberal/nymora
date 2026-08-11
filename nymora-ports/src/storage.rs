@@ -34,11 +34,11 @@ use nymora_core::{AgoraId, Epoch, PolicyClass, ProtocolError};
 ///
 /// # What is deliberately absent
 ///
-/// **Receipt-ledger state (§10.2).** Proposal 0010 proposes deferring the ledger, and proposal
-/// 0009 proposes a construction that would put chain state here whose loss has protocol
-/// consequences. Neither is decided, so no slot is reserved. Adding one later is not a breaking
-/// change — this enum is `#[non_exhaustive]` — whereas shipping a slot that turns out to hold
-/// nothing would be a durability contract made on a guess.
+/// **Receipt-ledger state (§10.2).** The ledger is deferred (proposal 0010, applied), so no
+/// slot is reserved — and this port therefore holds no growing chain state and has no
+/// state-loss failure mode with protocol consequences, which is a deliberately smaller
+/// durability contract. If the ledger returns, adding a slot is not a breaking change: this
+/// enum is `#[non_exhaustive]`.
 ///
 /// Cached accumulator roots were absent for the same reason until [`PolicyClass`] existed:
 /// roots are scoped per class as well as per epoch (§5.2), and a slot keyed only by [`Epoch`]

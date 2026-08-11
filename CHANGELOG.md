@@ -26,6 +26,20 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (§6.6) carries no `corroborations` array. The section remains specified, with a note that
   reintroducing it reopens the nullifier decision below — it is not an isolated feature
   (proposal 0006).
+- The personal receipt ledger and its enforcement (§10.2–§10.4) are **deferred** to a later
+  protocol version, and the pinned-heads bullet leaves the transparency log, which now
+  carries only aggregate, identity-free commitments. The mechanism was contradictory as
+  specified — §10.3's one-chain-per-credential enforcement requires exactly the credential
+  identification §10.4 makes uncomputable — and two of its three legs cannot be implemented
+  at all: a replay witness holds no verification key for any past-epoch entry, since
+  `pk_epoch` is never published and epoch keys are destroyed at epoch end; and
+  verifiably-random witness selection needs a randomness beacon and an anonymous unicast
+  channel the design does not have, then leaks membership size, which §5.2 forbids at any
+  point. §10.4's closing note records every obstacle plus the shape a viable reintroduction
+  takes — write-time completeness via linear head registration (proposal 0009, closed as
+  its prerequisite), self-verifying action artifacts instead of signatures, the member as
+  verifier — so whoever reopens the ledger starts from what can exist (proposals 0009,
+  0010).
 
 ### Added
 - Canonical signed-payload encodings for the epoch certificate (§9.1) and the migration

@@ -1,9 +1,21 @@
 # Proposal 0010 — Defer the receipt ledger to a later protocol version
 
-**Status:** **Proposed**
+**Status:** **Applied** — the sections below are now marked deferred in the specification
 **Affects:** §2, §10, §10.1, §10.2, §10.3, §10.4, §14
 **Supersedes:** 0009, which repairs a mechanism this proposal defers
 **Answers:** 0008's open question — "does anything else rest on one-key-per-epoch?"
+
+> **Applied with three additions to the closing note, and one row updated.** Since this was
+> drafted, the review that strengthened it also found that §10.2's replay verification is
+> impossible as specified — entries are signed with `sk_epoch`, whose public key is never
+> published and whose private key is destroyed at epoch end, so a witness holds no
+> verification key for any past-epoch entry. That finding, and the shape a viable
+> reintroduction takes — write-time completeness via 0009's linear heads, self-verifying
+> action artifacts instead of signatures, the member as verifier, mandated third-party audit
+> permanently out of reach — were added to §10.4's closing note so a reintroducer meets
+> every obstacle at once. The §2 transparency-log row reads "exclusion roots" rather than
+> "revocation-set root", matching 0015, which was applied first. The second open question
+> below was answered by proposal 0011 before this one was decided.
 
 ---
 
