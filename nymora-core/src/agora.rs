@@ -51,6 +51,11 @@ pub enum CeremonyMode {
     /// One founder holds the master key alone — the bootstrap window of §4.1.
     SingleParty,
     /// Threshold custody from the outset, requiring `threshold` of `parties`.
+    ///
+    /// A performable ceremony has `1 <= threshold <= parties`. This type does not enforce
+    /// that — it is a wire shape, and refusing to represent a value is not the same as
+    /// refusing to act on one — but the identifier derivation guards it in debug builds,
+    /// since an identifier derived from an unperformable ceremony is permanent.
     Threshold {
         /// Shares required to act.
         threshold: u16,

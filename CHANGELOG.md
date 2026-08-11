@@ -98,6 +98,14 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   which is what `Unavailable` would imply.
 
 ### Fixed
+- `Witness` no longer derives `Debug`: the derived form printed the member's index — their
+  position in the membership set, which the crate's own `Node` type already refuses to log
+  by habit — plus every sibling on the path. The hand-written form renders only the depth,
+  which is a published property of the agora.
+- `agora_id::derive` debug-guards ceremony plausibility the way it already guarded the
+  founding key: a threshold ceremony claiming fewer than one signer or more signers than
+  parties is a caller bug, and the identifier it derives is permanent, so it is refused in
+  debug builds rather than committed to and shared out-of-band.
 - Specification §5.3: the vouch nullifier is **agora-scoped** —
   `Hash(sk_cred, session_id, agora_id)`. It was the only count-nullifier that did not absorb
   the agora, on the reasoning that a session identifier is already unique to the agora that

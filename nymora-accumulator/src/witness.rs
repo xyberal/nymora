@@ -80,10 +80,22 @@ pub fn hash_node(left: &Node, right: &Node) -> Node {
 /// stored expiry: a stale witness simply recomputes a root that is no longer current, so
 /// [`verifies`] returns false against the live root. That is the same check that catches a
 /// forged witness, so there is exactly one way to be wrong and one way to detect it.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Witness<const DEPTH: usize> {
     index: u64,
     siblings: [Node; DEPTH],
+}
+
+impl<const DEPTH: usize> core::fmt::Debug for Witness<DEPTH> {
+    /// Renders without the index or the siblings.
+    ///
+    /// [`Node`]'s `Debug` rationale applies with more force here: the index *is* the member's
+    /// position in the membership set — more sensitive than any single node on the path — and
+    /// the siblings are the path itself. Only the depth appears, and it is a published
+    /// property of the agora.
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "Witness {{ index: <redacted>, depth: {DEPTH} }}")
+    }
 }
 
 impl<const DEPTH: usize> Witness<DEPTH> {
@@ -257,6 +269,15 @@ mod tests {
             interior.as_bytes(),
             "a leaf hash collided with an interior node"
         );
+    }
+
+    /// The index must not reach a log by habit — see `Debug` on [`Witness`].
+    #[test]
+    fn debug_redacts_the_position_and_the_path() {
+        let rendered = std::format!("{:?}", witness(3));
+        assert!(rendered.contains("<redacted>"), "{rendered}");
+        assert!(!rendered.contains('3'), "the index leaked: {rendered}");
+        assert!(!rendered.contains("0202"), "a sibling leaked: {rendered}");
     }
 
     #[test]

@@ -20,7 +20,7 @@
 //! [`crate::Hasher`] is.
 
 use crate::hash::ByteHasher;
-use nymora_core::{AgoraId, Domain, PublicParameters};
+use nymora_core::{AgoraId, CeremonyMode, Domain, PublicParameters};
 
 /// Derives an agora's identifier from its founding parameters.
 ///
@@ -30,17 +30,26 @@ use nymora_core::{AgoraId, Domain, PublicParameters};
 ///
 /// # Panics
 ///
-/// Debug builds only, if `founding_key` is shorter than 16 bytes. That is not a length the
-/// protocol requires but a guard against the failure described in [`PublicParameters`]:
-/// passing a name or a label here rather than key material would make the resulting
-/// identifier guessable, and an agora's existence is the thing §3 protects. Real key material
-/// is far longer than this floor.
+/// Debug builds only, on two implausibilities. If `founding_key` is shorter than 16 bytes:
+/// that is not a length the protocol requires but a guard against the failure described in
+/// [`PublicParameters`] — passing a name or a label here rather than key material would make
+/// the resulting identifier guessable, and an agora's existence is the thing §3 protects.
+/// And if a threshold ceremony claims fewer than one signer or more signers than parties:
+/// a nonsense ceremony is a caller bug, not a protocol case, and the identifier it derives
+/// is permanent — better refused while the caller is still in a debugger than committed to
+/// and shared out-of-band.
 #[must_use]
 pub fn derive(params: &PublicParameters<'_>) -> AgoraId {
     debug_assert!(
         params.founding_key.len() >= 16,
         "founding_key looks like a label rather than key material; see PublicParameters"
     );
+    if let CeremonyMode::Threshold { threshold, parties } = params.ceremony {
+        debug_assert!(
+            threshold >= 1 && threshold <= parties,
+            "a {threshold}-of-{parties} ceremony cannot be performed; see PublicParameters"
+        );
+    }
 
     AgoraId::from_bytes(
         ByteHasher::new(Domain::AgoraId)
@@ -86,8 +95,8 @@ mod tests {
             derive(&params(CeremonyMode::SingleParty, KEY)),
             derive(&params(
                 CeremonyMode::Threshold {
-                    threshold: 0,
-                    parties: 0
+                    threshold: 1,
+                    parties: 1
                 },
                 KEY
             )),
@@ -96,21 +105,17 @@ mod tests {
     }
 
     /// Threshold parameters are part of the committed set, not decoration.
+    ///
+    /// Each field is absorbed independently at its own fixed-width offset, so this also rules
+    /// out the two being interchangeable — an earlier version of this test showed that with a
+    /// 3-of-2 ceremony, which the derivation now refuses in debug builds as unperformable.
     #[test]
     fn the_threshold_shape_changes_the_identifier() {
-        let two_of_three = CeremonyMode::Threshold {
-            threshold: 2,
-            parties: 3,
+        let at = |threshold, parties| {
+            derive(&params(CeremonyMode::Threshold { threshold, parties }, KEY))
         };
-        let three_of_two = CeremonyMode::Threshold {
-            threshold: 3,
-            parties: 2,
-        };
-        assert_ne!(
-            derive(&params(two_of_three, KEY)),
-            derive(&params(three_of_two, KEY)),
-            "threshold and parties are interchangeable in the encoding"
-        );
+        assert_ne!(at(2, 3), at(3, 3), "the threshold was not absorbed");
+        assert_ne!(at(2, 3), at(2, 2), "the party count was not absorbed");
     }
 
     /// The ceremony/key boundary must not be movable.
