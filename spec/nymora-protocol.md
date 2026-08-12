@@ -152,7 +152,7 @@ POST /agora/{agora_id}/vouch/session/{id}/attest
   → { status: "recorded" }
 
 POST /agora/{agora_id}/vouch/session/{id}/finalize
-  → { threshold_met: true, credential_update_token }
+  → { threshold_met: true, position, active_from_epoch }
 ```
 
 Someone has to be first; a threshold-of-1 admission is an unavoidable structural fact of any bootstrap. This is the *only* special case in the entire admission history of the agora.
@@ -168,6 +168,8 @@ POST /agora/{agora_id}/policy/tier2/proposal/{id}/activate
 ```
 
 A proposal expires at the end of the epoch in which it was raised, and must be re-raised to continue. The reason is not nullifier comparability — approvals are counted by a nullifier derived from `sk_cred`, which does not rotate (§9.1) — but quorum freshness: a proposal that outlived the membership set it was raised under would accumulate approvals against a threshold that no longer describes the group. An early advance following a revocation expires it for the same reason (§11).
+
+This propose/approve/execute flow is the agora's **one quorum machine** (proposal 0021): revocation (§11) and dissolution (§12) are decided through it too, all three approved with this same policy-approval action so §6.5's action set stays closed. What keeps the kinds apart is the proposal identifier, which is derived rather than issued: `subject_id = Hash(kind_tag; agora_id, epoch_raised, approving_class, canonical_decision_content, nonce)`, under a distinct domain tag per kind (`nymora/v0/proposal/policy`, `…/revocation`, `…/dissolution`). Because the approval nullifier derives over the subject, an approval collected for one kind is unforgeable as another — the argument that keeps a migration certificate from standing in for an epoch certificate (§9.1), applied to governance. Approving members **recompute the subject locally** from the served proposal content before approving: divergent content under one identifier is caught by the recomputation, and one content under two identifiers splits the approvals and meets quorum with neither. The `nonce` is fresh per raise, so a re-raised proposal is a new subject and inherits no approvals. The quorum an execution requires is itself agora policy — a governance quorum set by this same mechanism, starting at 1 in the founding state (§4.1's unavoidable window) and raised as thresholds are.
 
 Charlie, Dave, and all future members are vouched in via the identical 2-of-N (or higher) threshold flow. No credential anywhere in the agora carries a "founder" flag or distinct issuance type — every credential is structurally indistinguishable, differing only in the unavoidable fact of when it entered the accumulator.
 
@@ -223,6 +225,8 @@ GET /agora/{agora_id}/accumulator/{policy_class}/root   [member-gated — see §
 
 **No API surface exposes accumulator size, leaf count, or leaf listing, at any point.** Only the root hash is public (or member-visible, per §7); a fixed-depth tree's root reveals nothing about occupancy on its own.
 
+**Every root a proof is checked against is fixed for the whole epoch** (proposal 0020). Admissions and migration spends stage during the epoch and land at the boundary, where the epoch's canonical roots — class, revocation-set, and migration-spend — are snapshotted together; §9.3 states this rule for the exclusion roots, and it holds for the class accumulators for the same reasons. A member admitted in epoch *e* is present in the class root, and can first act, at *e + 1*. Revocation is the rule's sharpest form rather than an exception: §11 advances the epoch immediately, so its effect lands at a boundary the revocation itself forces. Three things follow. `root_at_epoch` is singular and total — one snapshot answers every historical verification. A member's witnesses are valid for exactly an epoch, refreshed at the boundary rather than raced against concurrent admissions. And the within-epoch admission cadence is never published, which serving any intermediate root would do.
+
 **Accumulators are append-only.** A leaf is added when a credential is admitted and is never removed or modified. Nothing in the protocol withdraws one: planned migration (§9.3) consumes the old leaf by spending its migration nullifier rather than deleting it, revocation (§11) maintains a separate revocation-set root, and dissolution (§12) freezes roots rather than emptying them.
 
 Two consequences follow, and both are easy to get wrong in the opposite direction.
@@ -247,10 +251,12 @@ POST /agora/{agora_id}/vouch/session/{id}/attest
   → { status: "recorded" }     ← no running count, ever
 
 POST /agora/{agora_id}/vouch/session/{id}/finalize
-  → { threshold_met: true, credential_update_token }
+  → { threshold_met: true, position, active_from_epoch }
 ```
 
 A vouch session must finalize within the epoch in which it was opened; one that does not is abandoned rather than carried over. As with policy proposals (§4.3), this bounds how long an admission decision may accumulate attestations against a fixed threshold, rather than serving any property of the nullifier itself.
+
+A successful finalize returns an **admission acknowledgement** and nothing more (proposal 0022): the leaf's permanent position in the class accumulator, for witness refresh, and the epoch from which it is present in the class root (proposal 0020). There is deliberately no bearer token in this response — the member's credential is their own material, already on their device before the session opened, so there is nothing for Skiora to hand over: a token would be a stealable value protecting a resource the accumulator insertion itself establishes. The acknowledgement is not secret and authorizes nothing; losing it costs nothing, since the same facts are recoverable by refreshing a witness for the member's own leaf. A finalize whose threshold is unmet consumes the session either way — continuing to gather attestations after the outcome was disclosed would reintroduce the incremental disclosure this flow's response shape exists to prevent; admission is re-raised as a fresh session or not at all.
 
 Each attestation proof establishes the full membership chain of §9.1 in zero knowledge, proven against `Root_voucher_eligible_{tier}`. That statement is normative in §9.1 and is not restated here; only its final clause varies by action. For vouching the final clause is:
 
@@ -777,9 +783,11 @@ Each agora optionally publishes its integrity-critical state commitments to an *
 
 **On the log (identity-free aggregate commitments only):**
 - the sequence of accumulator roots per epoch (`Root_tier2_epoch_0, Root_tier2_epoch_1, …`) — already just hashes that reveal nothing about membership (§5.2);
-- signed tree heads making the root sequence itself an append-only Merkle log, so a published root cannot later be swapped or deleted without breaking the log's hash chain;
+- signed heads chaining the entries into an append-only **hash chain** (`head_n = Hash(head_{n-1}, entry_n)`), so a published root cannot later be swapped or deleted without breaking every later head. Heads are signed by an **operator-held log key** — member keys are private witnesses (§9.1) and the wrong tool — so each signed head is the operator's non-repudiable commitment to the entire history beneath it (proposal 0023);
 - policy-change events (§5.3) as committed entries — *that* a policy changed at a given epoch, never who voted;
 - the revocation-set root (§11) and the migration-spend root (§9.3) — the two exclusion roots every routine proof proves non-membership against — so exclusion state is publicly consistent and cannot be forked per member.
+
+The chain is deliberately linear, not a Merkle log with consistency proofs (proposal 0023). The log grows per epoch, not per action, so replaying it whole is cheaper than verifying a single tree consistency proof — and replay is also the only fetch pattern members should use: a consistency-proof query names the two heads it connects, telling the operator exactly which state the asking member last saw. Auditors fetch the entry suffix whole and uniformly, the same shape as §11's whole-set service. Pooled logs, or third-party monitors at a scale where replay stops being cheap, are the signal to revisit the structure; the signed-head format and the auditor's claims survive that upgrade unchanged.
 
 **Never on the log:** nullifiers, attestation bundles, content, tags, individual membership commitments, or verification receipts tied to members. The line is aggregate, identity-free state commitments only; anything per-action or per-member stays off.
 
@@ -888,7 +896,11 @@ What a member can establish about older content is epoch-coarse and computed loc
 
 **Revocation is asymmetric in effect, and both sides are closed deliberately.** Write capability ends because every routine proof must show the credential's leaf absent from the revocation set at the current epoch (§9.1); the leaf itself never leaves the accumulator (§5.2), and does not need to. Read capability ends through the tag-key broadcast: a revoked member already holds the current epoch's `K_tag_e` and the content keys gated alongside it (§6.4), and those are replaced only at an epoch boundary.
 
+Revocation itself is decided through the quorum machine of §4.3 (proposal 0021): a proposal whose subject derives under the revocation domain tag over the leaf being revoked, approved with the ordinary policy-approval action, executed at the governance quorum. Its execution inserts the leaf into the revocation set and forces the boundary below — which is also what expires every other open proposal and session, this one having been consumed first.
+
 Revocation therefore advances the epoch immediately rather than waiting for the schedule (§9.1). The new `K_tag` is broadcast to the remaining members, and the revoked credential receives nothing further. This is what makes the "prompt revocation" named below an available mitigation rather than one capped by the routine epoch interval. It closes future access only: content already resolved cannot be un-resolved, consistent with the absence of any cryptographic undo.
+
+The boundary broadcast carries more than the tag key: it is the members' distribution channel for everything the new epoch fixed — the epoch's canonical roots (proposal 0020), both exclusion sets whole, and `K_tag` — so that every remaining member can refresh witnesses and act without a bootstrap dependency on the member-gated services of §7, which a member could not satisfy at a boundary where anything changed without the very material being distributed. The sets travel whole rather than as deltas: a delta presumes an earlier copy, and a member admitted at that very boundary has none — they would start life unable to compute the absence witnesses their first proof requires. The delivery cut is the security property: what reaches remaining members and not the revoked one is exactly this broadcast.
 
 The revocation set and the migration-spend set (§9.3) are served to members whole, member-gated like roots (§7), and non-membership witnesses are computed locally by each Persora. A witness request naming a specific leaf would disclose to Skiora exactly which credential is about to act; serving the full set is what keeps the request anonymous, and is affordable because both sets grow with revocations and migrations, never with membership or content.
 
@@ -918,6 +930,8 @@ POST /agora/{agora_id}/dissolve/{id}/execute
   [auto-triggered once quorum threshold met]
   → { status: "keys_destroyed", verifiable_destruction_proof }
 ```
+
+This flow is the quorum machine of §4.3 without residue (proposal 0021): *initiate* is a proposal whose subject derives under the dissolution domain tag, each *confirm* is an ordinary policy-approval over that subject, and *execute* is the threshold-met execution. Nothing about dissolution's approval arithmetic is bespoke; what is unique to it is the effect.
 
 With multi-party (MPC) key custody in place (per §4.4), dissolution is a genuine mathematical fact, not a promise: once enough key shares are independently destroyed that the reconstruction threshold can no longer be met, the master key is information-theoretically unrecoverable, regardless of what any remaining party does.
 

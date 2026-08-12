@@ -67,7 +67,7 @@ impl FreshEntropy {
     }
 
     /// Copies the bytes out, consuming the wrapper.
-    fn take(self) -> [u8; 32] {
+    pub(crate) fn take(self) -> [u8; 32] {
         *self.0.expose()
     }
 }

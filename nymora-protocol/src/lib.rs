@@ -3,22 +3,30 @@
 //! `nymora-protocol` — the protocol as code, for both roles.
 //!
 //! This crate is where sequencing lives: operations that touch several primitives and both
-//! ports in an order that carries security properties. Today that is the credential
-//! lifecycle of §9.1–§9.3 ([`credential`]) and the witness-assembly path from stored
-//! material into the proof statements ([`proving`]); the transport-agnostic state machines
-//! and message contracts — vouching, admission, revocation, dissolution, live
-//! authentication — arrive in a later phase, on top of both.
+//! ports — or several parties — in an order that carries security properties. For the
+//! member that is the credential lifecycle of §9.1–§9.3 ([`credential`]), the
+//! witness-assembly path into the proof statements ([`proving`]), and the live-auth
+//! commit-reveal machine ([`live_auth`]); shared between the roles, the quorum-decision
+//! subjects ([`decision`]); and for the operator — behind the `operator` feature — the
+//! whole server side of §4–§12 ([`operator`]): vouch sessions, quorum decisions,
+//! verification access, migration acceptance, revocation, dissolution, and the
+//! transparency log.
 //!
 //! Like everything in the engine it is sans-io and `no_std`: time arrives as [`Epoch`]
 //! parameters, randomness as [`FreshEntropy`] parameters, and platform behaviour through
-//! the two ports of `nymora-ports`. See `../../ARCHITECTURE.md` for why this crate drives
-//! the ports rather than instructing a host to.
+//! the two ports of `nymora-ports`. The operator role additionally needs an allocator for
+//! its collections; the member side deliberately does not. See `../../ARCHITECTURE.md`
+//! for why this crate drives the ports rather than instructing a host to.
 //!
 //! [`Epoch`]: nymora_core::Epoch
 
 #![no_std]
 
 pub mod credential;
+pub mod decision;
+pub mod live_auth;
+#[cfg(feature = "operator")]
+pub mod operator;
 pub mod proving;
 
 pub use credential::{
@@ -27,7 +35,11 @@ pub use credential::{
 };
 #[cfg(feature = "provisional-algebraic-hash")]
 pub use credential::{complete_migration, create, Created, Migrated};
+pub use decision::{subject_id, Decision, SubjectId};
 pub use proving::{load_acting_material, ActingMaterial};
+
+#[cfg(feature = "operator")]
+extern crate alloc;
 
 #[cfg(test)]
 extern crate std;

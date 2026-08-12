@@ -6,6 +6,41 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **The protocol state machines, both roles** — `nymora-protocol` now carries the whole
+  server side of §4–§12 behind a new `operator` feature (`AgoraState`): single-founder
+  bootstrap (§4.1), vouch sessions with nullifier distinctness and zero-field
+  acknowledgements (§5.3), the quorum-decision machine serving policy changes, revocations,
+  and dissolutions alike (§4.3, §11, §12; proposal 0021), challenge-bound verification
+  access with consumed-on-presentation challenges (§7; proposal 0019), the migration
+  acceptance path with boundary-staged spends (§9.3), revocation with an immediate forced
+  boundary and full expiry cascade (§11), the opt-in transparency log with hash-chained
+  signed heads and pure auditor functions (§10.1; proposal 0023), and terminal
+  dissolution (§12). The feature is
+  off by default so the member side stays allocation-free.
+- Member-side live-authentication session machine (`live_auth`): a typestate over
+  commit-reveal-derive (§8.1) — no path reveals before the roster is locked, duplicate
+  commitments abort before any reveal, every opening is checked, and the same machine
+  serves the in-person transports of §8.3 because the transport was never its business.
+- Shared quorum-decision subjects (`decision`), ungated so approving members recompute
+  them: `subject_id = Hash(kind_tag; agora, epoch, approving_class, content, nonce)` under
+  three new domain tags — approvals for one decision kind are unforgeable as another, and
+  divergent content under one identifier is caught by recomputation (proposal 0021).
+- The boundary **bulletin**: `advance_epoch` returns the new epoch's roots, both exclusion
+  sets whole, and the tag key — §11's broadcast mechanism generalized, which is also what
+  breaks the bootstrap circularity a bare §7 gate would create and equips a member admitted
+  at that very boundary. `ExclusionSet` gained `keys()` for exactly this whole-set service.
+- Specification: proposals 0020 (roots are fixed per epoch; mutations land at boundaries),
+  0021 (quorum decisions share one machine and one action), 0022 (the
+  `credential_update_token` reduces to an admission acknowledgement), and 0023 (the
+  transparency log is a hash chain with operator-signed heads, not a Merkle log), applied
+  to §4.2, §4.3, §5.2, §5.3, §10.1, §11, and §12.
+- Two-agora end-to-end lifecycle test: bootstrap through dissolution across two agoras on
+  software keys and stub proofs, with the negative class as explicit assertions — no
+  identifier, leaf, nullifier, pseudonym, tag, tag key, subject, or root correlates, and
+  one agora's dissolution is invisible in the other. This is the phase-5 milestone: the
+  whole protocol above the port boundary now runs.
+- Known-answer pins (independently computed) for the two new canonical byte constructions:
+  quorum subjects and the transparency log's chain step.
 - Initial workspace scaffold: `nymora-core`, `nymora-crypto`, `nymora-accumulator`,
   `nymora-circuits`, `nymora-proofs`, `nymora-protocol`, `nymora-ports` (empty placeholders).
 - Self-contained CI (format, lint, test, license-header check).
@@ -140,6 +175,20 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and fetching is I/O, which is the host's.
 
 ### Changed
+- §11's whole-set service is now honest in the accumulator: the exclusion-set module no
+  longer claims Skiora serves absence witnesses — a witness request naming a key would
+  disclose exactly which credential is about to act, so members receive the sets whole
+  (`ExclusionSet::keys`) and compute witnesses locally, as §11 always specified.
+- Specification §5.3, §4.2: `finalize` returns `{ threshold_met, position,
+  active_from_epoch }` — the `credential_update_token` is struck as a concept (proposal
+  0022), and a failed finalize consumes the session.
+- Specification §5.2: every root a proof is checked against is fixed for the whole epoch;
+  admissions and spends land at boundaries, and a member admitted in epoch *e* first acts
+  at *e + 1* (proposal 0020).
+- Specification §4.3, §11, §12: revocation and dissolution are decided through §4.3's
+  quorum machine with domain-separated, content-binding subject identifiers, and the
+  governance quorum is itself agora policy (proposal 0021). §11 additionally specifies the
+  boundary broadcast's full contents and why the sets travel whole.
 - Specification §9.1: the membership chain states `pk_epoch is the public counterpart of
   sk_epoch` explicitly. Implementing the statement types surfaced that the clause was
   implied but absent — and without it the certificate constrains nothing about the key the

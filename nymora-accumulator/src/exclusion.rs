@@ -160,12 +160,15 @@ pub use build::ExclusionSet;
 
 #[cfg(feature = "build")]
 mod build {
-    //! Set construction — the operator's side.
+    //! Set construction — the operator's side, and the member's own copy.
     //!
     //! Skiora holds each set, inserts on revocation (§11) and on migration spend (§9.3),
-    //! publishes the root per epoch, and serves absence witnesses to members. As with the
-    //! positional tree, the operator necessarily knows its own set; the line to hold is
-    //! that nothing here has any counterpart on a member-facing interface.
+    //! publishes the root per epoch, and serves **the whole set** to members, member-gated
+    //! like roots (§11). Each Persora then rebuilds the set locally and computes its own
+    //! non-membership witnesses: a witness request naming a specific key would disclose to
+    //! Skiora exactly which credential is about to act, and serving the full set is what
+    //! keeps the request anonymous. It stays affordable because both sets grow with
+    //! revocations and migrations, never with membership or content.
 
     extern crate alloc;
 
@@ -179,9 +182,11 @@ mod build {
     ///
     /// Insertion is permanent — nothing leaves a revocation or spend set (§11, §9.3) — and
     /// idempotent, since re-revoking a credential is a repeat of the same fact rather than
-    /// an error. There is no `len`, no `is_empty`, no iterator, and no membership query:
-    /// the set exists to prove absence, and a count of revocations is information about
-    /// members (§5.2's discipline).
+    /// an error. There is no `len`, no `is_empty`, and no membership query. The one
+    /// enumeration is [`keys`](ExclusionSet::keys), because §11 makes whole-set service to
+    /// members normative; unlike the positional tree, a member-visible count of exclusions
+    /// is deliberate — *"k revocations since"* is exactly the epoch-coarse fact §11 tells
+    /// members to weigh older content by.
     pub struct ExclusionSet {
         keys: BTreeSet<[u8; DIGEST_LEN]>,
     }
@@ -204,6 +209,15 @@ mod build {
         /// Inserts a key. Idempotent; a repeat insertion changes nothing, including the root.
         pub fn insert(&mut self, key: [u8; DIGEST_LEN]) {
             self.keys.insert(key);
+        }
+
+        /// Every key, in path (lexicographic) order — §11's whole-set service.
+        ///
+        /// This is how the set crosses to a member: whole, behind the member gate of §7,
+        /// so the member can rebuild it and compute non-membership witnesses locally
+        /// without ever naming the key they are about to prove absent.
+        pub fn keys(&self) -> impl Iterator<Item = &[u8; DIGEST_LEN]> {
+            self.keys.iter()
         }
 
         /// The current root. Publish per epoch; it moves on every first-time insertion.

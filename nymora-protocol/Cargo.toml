@@ -20,6 +20,16 @@ provisional-algebraic-hash = [
     "nymora-circuits/provisional-algebraic-hash",
     "nymora-proofs/provisional-algebraic-hash",
 ]
+# The Skiora role (§2.1): agora state, vouch sessions, quorum decisions, verification
+# access, migration acceptance, and the transparency log. Off by default so the member
+# side stays allocation-free — the operator needs collections (an allocator) and, for log
+# heads, the provisional signature. A conformant Skiora wraps this; a Persora never
+# enables it.
+operator = [
+    "provisional-algebraic-hash",
+    "nymora-accumulator/build",
+    "nymora-crypto/provisional-signature",
+]
 
 [dependencies]
 nymora-core = { path = "../nymora-core" }

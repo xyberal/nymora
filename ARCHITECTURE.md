@@ -83,8 +83,10 @@ nymora-core          types, wire formats, domain registry, errors
                             (`software-key-store` also uses the provisional
                              signature from nymora-crypto)
 
-nymora-protocol      credential lifecycle (§9.1–§9.3) and witness assembly into the
-   │                 statements; the state machines of both roles, in a later phase
+nymora-protocol      credential lifecycle (§9.1–§9.3), witness assembly into the
+   │                 statements, the member-side live-auth machine (§8), the shared
+   │                 quorum-decision subjects — and, behind the `operator` feature,
+   │                 the whole Skiora role of §4–§12 (`AgoraState`)
    └── depends on everything above, including the ports
 ```
 
@@ -96,3 +98,10 @@ merely defining or implementing them. The lifecycle's ordering carries security 
 one audited implementation of that sequencing is the same argument as one shared circuit —
 a host asked to remember the ordering would eventually forget it. Everything below stays
 port-free.
+
+The operator role lives in the same open crate as the member role because a protocol
+defines both sides: a conformant Skiora *wraps* `AgoraState` — adding HTTP, persistence,
+sessions, and the delivery of boundary bulletins to remaining members — rather than
+reimplementing the rules where no auditor can see them. The feature is off by default so
+the member-side build stays allocation-free; the operator needs collections, and only the
+operator.

@@ -131,6 +131,28 @@ domains! {
     /// The routing tag attached to published content (§6.4).
     TagRouting => "nymora/v0/tag/routing",
 
+    /// The subject identifier of a policy-change proposal (§4.3).
+    ///
+    /// The three proposal domains exist so that every quorum decision can be approved by
+    /// the one policy-approval action (§6.5's closed action set) while remaining
+    /// unforgeable for one another: an approval nullifier is derived over the subject
+    /// identifier, and subjects of different kinds derive under different tags, so an
+    /// approval collected for a policy change can never count toward a revocation or a
+    /// dissolution (proposal 0021).
+    ProposalPolicy => "nymora/v0/proposal/policy",
+
+    /// The subject identifier of a revocation proposal (§11).
+    ProposalRevocation => "nymora/v0/proposal/revocation",
+
+    /// The subject identifier of a dissolution proposal (§12).
+    ProposalDissolution => "nymora/v0/proposal/dissolution",
+
+    /// Chaining an entry into the per-agora transparency log (§10.1).
+    TransparencyEntry => "nymora/v0/transparency/entry",
+
+    /// The signed tree head committing to a transparency-log prefix (§10.1).
+    TransparencyHead => "nymora/v0/transparency/head",
+
     /// An entry in a credential's receipt ledger (§10.2).
     ///
     /// Reserved: the ledger is deferred (proposal 0010). The tag stays because this registry
