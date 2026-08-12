@@ -20,7 +20,9 @@ mod common;
 use common::{admit, advance, entropy, found, Member, TestStore};
 use nymora_accumulator::ExclusionSet;
 use nymora_circuits::StubProver;
-use nymora_core::{AgoraId, Epoch, MessageHash, PolicyClass, ProtocolError, RootOpening, TagKey};
+use nymora_core::{
+    AgoraId, Epoch, MessageHash, PolicyClass, ProtocolError, RootOpening, TagKey, WitnessKey,
+};
 use nymora_crypto::tag;
 use nymora_ports::{SecureStorage, Slot, SoftwareKeyStore};
 use nymora_proofs::{
@@ -51,6 +53,44 @@ fn founded(founder: &mut Member, log: bool) -> Op {
     found(founder, 0x1b, if log { Some(0x1c) } else { None })
 }
 
+// ---- §5.2: the witness service (proposal 0025) ----
+
+/// The witness service answers only to the epoch's key: a guessed key refuses over
+/// occupied and empty positions indistinguishably (no occupancy probe), and the boundary
+/// rotates the key, so yesterday's dies exactly where a revoked member's service must.
+#[test]
+fn the_witness_service_is_keyed_to_the_epoch() {
+    let mut alice = member(0x11);
+    let mut op = founded(&mut alice, false);
+
+    // An outsider's guess refuses — and an occupied position (0, the founder) is
+    // indistinguishable from an empty one (7).
+    let guess = WitnessKey::new([0x99; 32]);
+    assert_eq!(
+        op.witness(&guess, TIER2, 0).unwrap_err(),
+        ProtocolError::Rejected
+    );
+    assert_eq!(
+        op.witness(&guess, TIER2, 7).unwrap_err(),
+        ProtocolError::Rejected
+    );
+
+    // The bulletin-delivered key serves.
+    let key_now = WitnessKey::new(*alice.witness_key.as_ref().unwrap().expose());
+    assert!(op.witness(&key_now, TIER2, 0).is_ok());
+
+    // The boundary rotates it: the old key is dead, the new bulletin's works. This cut is
+    // what ends a revoked member's witness service (§11).
+    advance(&mut op, &mut [&mut alice]);
+    assert_eq!(
+        op.witness(&key_now, TIER2, 0).unwrap_err(),
+        ProtocolError::Rejected
+    );
+    assert!(op
+        .witness(alice.witness_key.as_ref().unwrap(), TIER2, 0)
+        .is_ok());
+}
+
 // ---- §4: the bootstrap arc ----
 
 /// §4 end to end: founder alone, threshold-of-1 second admission, policy raised by
@@ -65,8 +105,9 @@ fn the_bootstrap_arc_reaches_a_governed_group() {
     admit(&mut op, &mut bob, &[&alice], 0x51);
 
     // Bob is not yet present: admission lands at the boundary (proposal 0020).
+    let alice_key = alice.witness_key.as_ref().unwrap();
     assert_eq!(
-        op.witness(TIER2, bob.position).unwrap_err(),
+        op.witness(alice_key, TIER2, bob.position).unwrap_err(),
         ProtocolError::Rejected,
         "an unlanded leaf served a witness"
     );
@@ -83,7 +124,7 @@ fn the_bootstrap_arc_reaches_a_governed_group() {
         &proof,
         AGORA,
         op.current_epoch(),
-        &op.current_roots(TIER2).unwrap(),
+        &bob.roots.unwrap(),
         message,
         n
     ));
@@ -214,7 +255,7 @@ fn verification_is_member_gated_and_challenge_bound() {
 
     // Alice authors at this epoch; the bundle's tag names the epoch's key (§6.4).
     let authored_at = op.current_epoch();
-    let authored_roots = op.current_roots(TIER2).unwrap();
+    let authored_roots = alice.roots.unwrap();
     let message = MessageHash::from_bytes([0xaa; 32]);
     let (proof, n) = alice.acting(&op, |witness, epoch, roots| {
         prove_authorship(&StubProver, witness, AGORA, epoch, roots, message).expect("proves")
@@ -369,7 +410,7 @@ fn a_live_session_authenticates_everyone_present() {
     });
     assert_ne!(nym_a, nym_b);
     let epoch = op.current_epoch();
-    let roots = op.current_roots(TIER2).unwrap();
+    let roots = alice.roots.unwrap();
     assert!(verify_live_auth(
         &StubProver,
         &proof_b,
@@ -591,7 +632,9 @@ fn migration_is_accepted_spent_at_the_boundary_and_unrepeatable() {
         .unwrap()
         .expect("successor opening stored");
     let successor_opening = RootOpening::new(stored_opening);
-    let inclusion = op.witness(TIER2, bob.position).unwrap();
+    let inclusion = op
+        .witness(bob.witness_key.as_ref().unwrap(), TIER2, bob.position)
+        .unwrap();
     let revocation_absence = bob.revocations.absence_witness(bob.leaf.as_bytes());
     let witness = MigrationWitness {
         old_root_public_key: handoff.root_public_key,
@@ -603,7 +646,7 @@ fn migration_is_accepted_spent_at_the_boundary_and_unrepeatable() {
         successor_opening: &successor_opening,
         revocation_absence: &revocation_absence,
     };
-    let roots = op.current_roots(TIER2).unwrap();
+    let roots = bob.roots.unwrap();
     let (proof, spend) = prove_migration(
         &StubProver,
         &witness,
@@ -683,6 +726,8 @@ fn migration_is_accepted_spent_at_the_boundary_and_unrepeatable() {
         revocations: ExclusionSet::new(),
         spends: ExclusionSet::new(),
         tag_keys: Vec::new(),
+        roots: None,
+        witness_key: None,
     };
     successor.apply_bulletin(&bulletin);
     successor.acting(&op, |witness, epoch, roots| {
@@ -806,7 +851,7 @@ fn dissolution_freezes_the_agora_terminally() {
     let (proof, n) = alice.acting(&op, |witness, epoch, roots| {
         prove_authorship(&StubProver, witness, AGORA, epoch, roots, message).expect("proves")
     });
-    let cached_roots = op.current_roots(TIER2).unwrap();
+    let cached_roots = bob.roots.unwrap();
 
     // Quorum dissolution (§12): initiate is propose, confirm is approve, execute freezes.
     let subject = op
@@ -837,11 +882,12 @@ fn dissolution_freezes_the_agora_terminally() {
             .unwrap_err(),
         ProtocolError::Rejected
     );
+    assert_eq!(op.current_bulletin().unwrap_err(), ProtocolError::Rejected);
     assert_eq!(
-        op.current_roots(TIER2).unwrap_err(),
+        op.witness(bob.witness_key.as_ref().unwrap(), TIER2, 0)
+            .unwrap_err(),
         ProtocolError::Rejected
     );
-    assert_eq!(op.witness(TIER2, 0).unwrap_err(), ProtocolError::Rejected);
 
     // Bob's cached copy still verifies the historical attestation — §12: checkable for as
     // long as any member retains a cached copy.

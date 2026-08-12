@@ -131,6 +131,13 @@ domains! {
     /// The routing tag attached to published content (§6.4).
     TagRouting => "nymora/v0/tag/routing",
 
+    /// Derivation of an agora's per-epoch witness-service key (§5.2, proposal 0025).
+    ///
+    /// Distinct from [`Domain::TagKey`] although both derive from the same operator
+    /// secret: the tag key resolves content, the witness key gates the inclusion-witness
+    /// service, and a shared derivation would make leaking one leak both.
+    WitnessKey => "nymora/v0/witness/key",
+
     /// The subject identifier of a policy-change proposal (§4.3).
     ///
     /// The three proposal domains exist so that every quorum decision can be approved by

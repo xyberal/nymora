@@ -111,6 +111,20 @@ pub struct CredentialKey(SecretBytes<32>);
 #[derive(Debug, PartialEq, Eq)]
 pub struct TagKey(SecretBytes<32>);
 
+/// An agora's per-epoch witness-service key, `K_witness_e` (§5.2, proposal 0025).
+///
+/// Symmetric and shared like [`TagKey`], with the same lifecycle: derived per epoch by the
+/// operator, distributed to current members in the boundary broadcast (§11), and withheld
+/// from a revoked member at exactly the tag key's cut. It gates the inclusion-witness
+/// service — the one member service that *cannot* be gated by a membership proof, because
+/// a member's first proof of an epoch requires the witness itself.
+///
+/// Like the tag key, it authenticates nothing about *who* asked — only that the requester
+/// held the epoch's key. A leaked key lets an outsider probe class occupancy for that
+/// epoch (the shared-secret blast radius of §15), never forge a proof.
+#[derive(Debug, PartialEq, Eq)]
+pub struct WitnessKey(SecretBytes<32>);
+
 macro_rules! secret_newtype {
     ($($name:ident),+ $(,)?) => {
         $(
@@ -131,11 +145,17 @@ macro_rules! secret_newtype {
     };
 }
 
-secret_newtype!(EpochSecretKey, RootOpening, CredentialKey, TagKey);
+secret_newtype!(
+    EpochSecretKey,
+    RootOpening,
+    CredentialKey,
+    TagKey,
+    WitnessKey
+);
 
 #[cfg(test)]
 mod tests {
-    use super::{CredentialKey, EpochSecretKey, RootOpening, SecretBytes, TagKey};
+    use super::{CredentialKey, EpochSecretKey, RootOpening, SecretBytes, TagKey, WitnessKey};
     use std::format;
 
     #[test]
@@ -158,6 +178,7 @@ mod tests {
             ("r_root", format!("{:?}", RootOpening::new([0xcd; 32]))),
             ("sk_cred", format!("{:?}", CredentialKey::new([0xcd; 32]))),
             ("K_tag_e", format!("{:?}", TagKey::new([0xcd; 32]))),
+            ("K_witness_e", format!("{:?}", WitnessKey::new([0xcd; 32]))),
         ];
         for (name, output) in rendered {
             assert!(!output.contains("cd"), "{name} leaked into Debug output");

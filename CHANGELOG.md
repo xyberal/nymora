@@ -175,6 +175,20 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and fetching is I/O, which is the host's.
 
 ### Changed
+- **Current roots and inclusion witnesses are member-only** (§5.2, §11, §15; proposal
+  0025). The phase-5 `current_roots` and `witness` endpoints were ungated, and the
+  pre-publication read-through showed each negated a stated guarantee: a served current
+  root plus the public verifier is an affiliation oracle for external bundles (the
+  confirmation §6.4 exists to prevent, and the negation of §7's no-path-to-a-root claim),
+  and witness-by-position answers occupancy probes (§5.2 withholds occupancy at any
+  point). `current_roots` is deleted — the boundary bulletin is a member's only source
+  for current roots, with `current_bulletin` added for host re-delivery and for equipping
+  the founder at genesis — and the witness service now requires the epoch's
+  **witness-service key** (`K_witness_e`, new domain `nymora/v0/witness/key`), carried in
+  the bulletin with exactly the tag key's lifecycle. Keyed rather than proof-gated
+  because proof-gating has an unreachable base case: a member's first proof of an epoch
+  requires the witness itself. A wrong or stale key refuses identically over occupied and
+  empty positions.
 - Specification editorial pass ahead of publication: the illustrative wire snippets and
   the §4 diagram caught up with the proposals already applied around them — §4.1 no longer
   shows `credentials/init` returning a credential id and tier (the founder's leaf is placed

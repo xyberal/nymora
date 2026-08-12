@@ -49,6 +49,7 @@ pub mod policy_class;
 #[cfg(feature = "provisional-signature")]
 pub mod signature;
 pub mod tag;
+pub mod witness_key;
 
 #[cfg(feature = "provisional-algebraic-hash")]
 pub use algebraic::{AlgebraicHasher, ProvisionalAlgebraicBackend};
@@ -56,6 +57,7 @@ pub use algebraic::{AlgebraicHasher, ProvisionalAlgebraicBackend};
 pub use commit::commit;
 pub use hash::{ByteHasher, HashBackend, Hasher, Sha256Backend};
 pub use tag::{derive_tag_key, resolve, tag};
+pub use witness_key::derive_witness_key;
 
 // `kdf::derive`, `agora_id::derive`, and `policy_class::derive` are deliberately not
 // re-exported here. Three functions named `derive` at the crate root would be ambiguous at a

@@ -52,7 +52,7 @@ pub use epoch::Epoch;
 pub use error::{LocalReason, ProtocolError, Rejection};
 pub use handoff::{MigrationHandoff, HANDOFF_VERSION};
 pub use policy::PolicyClass;
-pub use secret::{CredentialKey, EpochSecretKey, RootOpening, SecretBytes, TagKey};
+pub use secret::{CredentialKey, EpochSecretKey, RootOpening, SecretBytes, TagKey, WitnessKey};
 
 #[cfg(test)]
 extern crate std;

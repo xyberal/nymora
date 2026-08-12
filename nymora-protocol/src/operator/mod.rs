@@ -30,17 +30,19 @@
 //! # The boundary bulletin
 //!
 //! [`AgoraState::advance_epoch`] returns a [`Bulletin`] — the new epoch's roots, both
-//! exclusion sets whole, and the new tag key. This is §11's own distribution
-//! mechanism generalized: the new `K_tag` is *broadcast* to remaining members, and the
-//! material a member needs to act in the new epoch travels the same way. It also breaks a
-//! circularity §7 alone would create: proving standing requires current roots and current
-//! non-membership witnesses, so if those were obtainable only behind a standing proof, no
-//! member could cross an epoch boundary at which anything changed. Roots are safe to treat
-//! this way — §5.2 makes the root hash the one value that may be visible — and the
-//! exclusion-set deltas go only where the tag key goes: to remaining members, which is
-//! exactly the cut §11 requires (a revoked credential receives nothing further). Delivery
-//! is the host's; a Skiora that hands the bulletin to a revoked member has reimplemented
-//! §11 incorrectly on its own side of the port.
+//! exclusion sets whole, the new tag key, and the new witness-service key. This is §11's
+//! own distribution mechanism generalized: the new `K_tag` is *broadcast* to remaining
+//! members, and the material a member needs to act in the new epoch travels the same way.
+//! It also breaks a circularity §7 alone would create: proving standing requires current
+//! roots and current non-membership witnesses, so if those were obtainable only behind a
+//! standing proof, no member could cross an epoch boundary at which anything changed. The
+//! bulletin is the *only* way current roots leave the engine ungated (proposal 0025) —
+//! there is no lookup to probe, because a public current root plus the public verifier
+//! would let an outsider test a bundle for agora affiliation, the confirmation §6.4
+//! exists to prevent. Everything in the bulletin goes only where the tag key goes: to
+//! remaining members, which is exactly the cut §11 requires (a revoked credential
+//! receives nothing further). Delivery is the host's; a Skiora that hands the bulletin to
+//! a revoked member has reimplemented §11 incorrectly on its own side of the port.
 
 mod access;
 mod log;
@@ -60,9 +62,9 @@ use nymora_accumulator::{ExclusionSet, Tree, Witness};
 use nymora_circuits::ProofSystem;
 use nymora_core::{
     AgoraId, Commitment, Epoch, LocalReason, Nullifier, PolicyClass, ProtocolError, Rejection,
-    Root, SecretBytes, TagKey,
+    Root, SecretBytes, TagKey, WitnessKey,
 };
-use nymora_crypto::derive_tag_key;
+use nymora_crypto::{derive_tag_key, derive_witness_key};
 use nymora_proofs::EpochRoots;
 
 /// A zero-information acknowledgement.
@@ -111,7 +113,8 @@ pub struct ClassPolicy {
 /// documentation).
 ///
 /// Everything a member needs to act in the new epoch: the roots proofs are now cut
-/// against, both exclusion sets **whole**, and the epoch's tag key. The sets travel whole
+/// against, both exclusion sets **whole**, the epoch's tag key, and the epoch's
+/// witness-service key (proposal 0025). The sets travel whole
 /// rather than as deltas because §11 already prices that as affordable — they grow with
 /// revocations and migrations, never with membership — and because a delta has a hidden
 /// precondition: a member admitted this very boundary has no earlier copy to advance, and
@@ -134,6 +137,9 @@ pub struct Bulletin {
     pub spent: Vec<[u8; 32]>,
     /// The new epoch's routing tag key (§6.4, §11).
     pub tag_key: TagKey,
+    /// The new epoch's witness-service key (§5.2, proposal 0025) — what a member presents
+    /// to refresh an inclusion witness, since that service cannot be proof-gated.
+    pub witness_key: WitnessKey,
 }
 
 /// One class's accumulator and bookkeeping.
@@ -305,41 +311,54 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
         self.epoch
     }
 
-    /// The roots proofs are cut against right now (§9.1).
+    /// The inclusion witness for a landed leaf, by its permanent position, under the
+    /// epoch's witness-service key (§5.2, proposal 0025).
     ///
-    /// Ungated: §5.2 makes the root hash the one value that may be visible, and a member
-    /// must be able to assemble a standing proof before holding one (see the module
-    /// documentation on the bulletin).
-    ///
-    /// # Errors
-    ///
-    /// [`ProtocolError::Rejected`] for an unknown class or a dissolved agora.
-    pub fn current_roots(&self, class: PolicyClass) -> Result<EpochRoots, ProtocolError> {
-        self.live()?;
-        Ok(self.roots_in(self.epoch, class)?)
-    }
-
-    /// The inclusion witness for a landed leaf, by its permanent position.
-    ///
-    /// Valid for exactly the current epoch (proposal 0020). Ungated in the engine — a
-    /// witness request names a member's own leaf, so the *transport* carrying it is what
-    /// must be anonymous (§16.2); the engine cannot see transports.
+    /// Valid for exactly the current epoch (proposal 0020). Keyed rather than proof-gated,
+    /// and the distinction is forced: a member's first proof of an epoch requires the
+    /// witness itself, so a proof gate has an unreachable base case — while no gate at all
+    /// answers position probes, and enumerating which positions answer yields the class
+    /// occupancy §5.2 withholds. The key arrives in the boundary [`Bulletin`] and rotates
+    /// with it, so a revoked member loses this service at the same cut as the tag key.
+    /// Which *member* is asking remains invisible to the engine; keeping the request
+    /// unlinkable on the wire is the transport's obligation (§16.2).
     ///
     /// # Errors
     ///
-    /// [`ProtocolError::Rejected`] for an unknown class, an unlanded position, or a
-    /// dissolved agora — indistinguishably.
+    /// [`ProtocolError::Rejected`] for a stale or wrong key, an unknown class, an unlanded
+    /// position, or a dissolved agora — indistinguishably.
     pub fn witness(
         &self,
+        key: &WitnessKey,
         class: PolicyClass,
         position: u64,
     ) -> Result<Witness<DEPTH>, ProtocolError> {
         self.live()?;
+        if *key != self.witness_key_now() {
+            return Err(Rejection::because(LocalReason::WitnessKeyStale).into());
+        }
         let class = self.class(class)?;
         Ok(class
             .tree
             .witness(position)
             .ok_or(Rejection::because(LocalReason::UnknownCredential))?)
+    }
+
+    /// The current epoch's [`Bulletin`], for host re-delivery to members only (§11).
+    ///
+    /// [`Self::advance_epoch`] hands the boundary's bulletin to the caller once; this
+    /// serves the same value again — for the genesis epoch, where no boundary has occurred
+    /// and the founder must be equipped (proposal 0025), and for re-broadcast to a member
+    /// who missed the boundary delivery. It is the member-gated broadcast payload, not a
+    /// public lookup: this value in a non-member's hands is §11 broken, exactly as for the
+    /// value `advance_epoch` returns.
+    ///
+    /// # Errors
+    ///
+    /// [`ProtocolError::Rejected`] on a dissolved agora.
+    pub fn current_bulletin(&self) -> Result<Bulletin, ProtocolError> {
+        self.live()?;
+        Ok(self.bulletin_now())
     }
 
     /// Advances to the next epoch: staged mutations land, roots snapshot, everything open
@@ -383,20 +402,7 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
         self.challenges.clear();
         self.snapshot();
 
-        let snapshot = &self.history[&self.epoch.get()];
-        Ok(Bulletin {
-            epoch: self.epoch,
-            class_roots: snapshot
-                .class_roots
-                .iter()
-                .map(|(class, root)| (*class, *root))
-                .collect(),
-            revocation_root: snapshot.revocation,
-            spend_root: snapshot.spend,
-            revoked: self.revocations.keys().copied().collect(),
-            spent: self.spends.keys().copied().collect(),
-            tag_key: self.tag_key_now(),
-        })
+        Ok(self.bulletin_now())
     }
 
     /// The transparency log, when this agora opted in (§10.1) — the public artifact,
@@ -477,6 +483,31 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
     /// This epoch's tag key (§6.4). Derived, not stored: the KDF is the schedule.
     fn tag_key_now(&self) -> TagKey {
         derive_tag_key(self.tag_secret.expose(), &self.agora, self.epoch)
+    }
+
+    /// This epoch's witness-service key (§5.2, proposal 0025). Derived under its own
+    /// domain from the same operator secret, so the two keys' compromises stay separate.
+    fn witness_key_now(&self) -> WitnessKey {
+        derive_witness_key(self.tag_secret.expose(), &self.agora, self.epoch)
+    }
+
+    /// The current epoch's members-only broadcast payload (§11).
+    fn bulletin_now(&self) -> Bulletin {
+        let snapshot = &self.history[&self.epoch.get()];
+        Bulletin {
+            epoch: self.epoch,
+            class_roots: snapshot
+                .class_roots
+                .iter()
+                .map(|(class, root)| (*class, *root))
+                .collect(),
+            revocation_root: snapshot.revocation,
+            spend_root: snapshot.spend,
+            revoked: self.revocations.keys().copied().collect(),
+            spent: self.spends.keys().copied().collect(),
+            tag_key: self.tag_key_now(),
+            witness_key: self.witness_key_now(),
+        }
     }
 
     /// How many admissions `class` can still stage before exhaustion (§5.2).

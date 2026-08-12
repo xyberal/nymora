@@ -82,8 +82,8 @@ fn the_whole_lifecycle_runs_in_two_agoras_that_share_nothing() {
     advance(&mut op_b, &mut [&mut erin, &mut dana_b]);
 
     // The epochs' roots share nothing between the agoras.
-    let roots_a = op_a.current_roots(tier_a).unwrap();
-    let roots_b = op_b.current_roots(tier_b).unwrap();
+    let roots_a = alice.roots.unwrap();
+    let roots_b = erin.roots.unwrap();
     assert_ne!(roots_a.class, roots_b.class);
     // Both exclusion sets are empty in both agoras, so those roots *do* coincide — the
     // empty tree is a public constant, not a correlator.
@@ -159,7 +159,7 @@ fn the_whole_lifecycle_runs_in_two_agoras_that_share_nothing() {
         &proof_a,
         agora_b,
         op_b.current_epoch(),
-        &op_b.current_roots(tier_b).unwrap(),
+        &erin.roots.unwrap(),
         message,
         null_a
     ));
@@ -248,7 +248,7 @@ fn the_whole_lifecycle_runs_in_two_agoras_that_share_nothing() {
     // B's revocation set is untouched: Dana still proves there, and B's current
     // revocation root is still the empty-set constant it started with.
     assert_eq!(
-        op_b.current_roots(tier_b).unwrap().revocation,
+        op_b.current_bulletin().unwrap().revocation_root,
         roots_b.revocation,
         "a revocation in one agora moved another's set"
     );
@@ -301,7 +301,13 @@ fn the_whole_lifecycle_runs_in_two_agoras_that_share_nothing() {
         .unwrap()
         .expect("stored");
     let successor_opening = RootOpening::new(opening);
-    let inclusion = op_b.witness(tier_b, dana_b.position).unwrap();
+    let inclusion = op_b
+        .witness(
+            dana_b.witness_key.as_ref().unwrap(),
+            tier_b,
+            dana_b.position,
+        )
+        .unwrap();
     let revocation_absence = dana_b.revocations.absence_witness(dana_b.leaf.as_bytes());
     let witness = MigrationWitness {
         old_root_public_key: handoff.root_public_key,
@@ -313,7 +319,7 @@ fn the_whole_lifecycle_runs_in_two_agoras_that_share_nothing() {
         successor_opening: &successor_opening,
         revocation_absence: &revocation_absence,
     };
-    let roots = op_b.current_roots(tier_b).unwrap();
+    let roots = dana_b.roots.unwrap();
     let (mig_proof, spend) = prove_migration(
         &StubProver,
         &witness,
@@ -342,6 +348,8 @@ fn the_whole_lifecycle_runs_in_two_agoras_that_share_nothing() {
         revocations: nymora_accumulator::ExclusionSet::new(),
         spends: nymora_accumulator::ExclusionSet::new(),
         tag_keys: Vec::new(),
+        roots: None,
+        witness_key: None,
     };
     dana_b2.apply_bulletin(&bulletin_b);
     dana_b2.acting(&op_b, |witness, epoch, roots| {
@@ -356,7 +364,7 @@ fn the_whole_lifecycle_runs_in_two_agoras_that_share_nothing() {
         .expect("the successor acts");
     });
     assert_eq!(
-        op_a.current_roots(tier_a).unwrap().spend,
+        op_a.current_bulletin().unwrap().spend_root,
         roots_a.spend,
         "a migration in one agora moved another's spend set"
     );
@@ -437,7 +445,7 @@ fn the_whole_lifecycle_runs_in_two_agoras_that_share_nothing() {
         other => panic!("wrong effect: {other:?}"),
     }
     assert_eq!(
-        op_b.current_roots(tier_b).unwrap_err(),
+        op_b.current_bulletin().unwrap_err(),
         ProtocolError::Rejected,
         "a dissolved agora still serves"
     );

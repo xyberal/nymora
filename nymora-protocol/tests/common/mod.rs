@@ -9,7 +9,9 @@
 
 use nymora_accumulator::ExclusionSet;
 use nymora_circuits::{ChainWitness, ProofSystem, StubProver};
-use nymora_core::{AgoraId, Commitment, Epoch, Nullifier, PolicyClass, ProtocolError, TagKey};
+use nymora_core::{
+    AgoraId, Commitment, Epoch, Nullifier, PolicyClass, ProtocolError, TagKey, WitnessKey,
+};
 use nymora_crypto::{nullifier, signature};
 use nymora_ports::{SecureStorage, Slot, SoftwareKeyStore};
 use nymora_proofs::{prove_policy_approval, prove_vouch, EpochRoots};
@@ -72,6 +74,11 @@ pub struct Member {
     pub revocations: ExclusionSet,
     pub spends: ExclusionSet,
     pub tag_keys: Vec<(Epoch, TagKey)>,
+    /// The epoch's roots, as the bulletin delivered them (proposal 0025) — a member
+    /// holds no other source for them.
+    pub roots: Option<EpochRoots>,
+    /// The epoch's witness-service key, from the same bulletin (proposal 0025).
+    pub witness_key: Option<WitnessKey>,
 }
 
 impl Member {
@@ -105,6 +112,8 @@ impl Member {
             revocations: ExclusionSet::new(),
             spends: ExclusionSet::new(),
             tag_keys: Vec::new(),
+            roots: None,
+            witness_key: None,
         };
         member.roll(epoch);
         member
@@ -128,7 +137,9 @@ impl Member {
     }
 
     /// What the host does with a boundary broadcast (§11): replace local set copies with
-    /// the whole sets the bulletin carries, store the tag key, roll the credential.
+    /// the whole sets the bulletin carries, cache the roots and both epoch keys, roll the
+    /// credential. The bulletin is a member's only source for current roots and the
+    /// witness key (proposal 0025).
     pub fn apply_bulletin(&mut self, bulletin: &Bulletin) {
         self.revocations = ExclusionSet::new();
         for key in &bulletin.revoked {
@@ -138,6 +149,18 @@ impl Member {
         for key in &bulletin.spent {
             self.spends.insert(*key);
         }
+        let class_root = bulletin
+            .class_roots
+            .iter()
+            .find(|(class, _)| *class == self.class)
+            .map(|(_, root)| *root)
+            .expect("the bulletin carries this member's class");
+        self.roots = Some(EpochRoots {
+            class: class_root,
+            revocation: bulletin.revocation_root,
+            spend: bulletin.spend_root,
+        });
+        self.witness_key = Some(WitnessKey::new(*bulletin.witness_key.expose()));
         nymora_protocol::store_tag_key(
             self.agora,
             &mut self.store,
@@ -169,8 +192,11 @@ impl Member {
         f: impl FnOnce(&ChainWitness<'_, D>, Epoch, &EpochRoots) -> R,
     ) -> R {
         let epoch = op.current_epoch();
-        let roots = op.current_roots(self.class).expect("roots are public");
-        let inclusion = op.witness(self.class, self.position).expect("leaf landed");
+        let roots = *self.roots.as_ref().expect("equipped by a bulletin");
+        let key = self.witness_key.as_ref().expect("equipped by a bulletin");
+        let inclusion = op
+            .witness(key, self.class, self.position)
+            .expect("leaf landed");
         let revocation = self.revocations.absence_witness(self.leaf.as_bytes());
         let spend = self.spends.absence_witness(&self.spend_key());
         let mut pk_buf = [0u8; 64];
@@ -259,6 +285,10 @@ pub fn found<const D: usize>(
     )
     .expect("founding succeeds");
     founder.position = 0;
+    // Genesis has no boundary, so the founder is equipped by the current bulletin —
+    // the same members-only channel every later epoch uses (proposal 0025).
+    let bulletin = op.current_bulletin().expect("agora is live");
+    founder.apply_bulletin(&bulletin);
     op
 }
 
