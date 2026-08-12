@@ -32,5 +32,7 @@ jobs:
       # hash, which is the configuration to check against before shipping.
       - name: Test without the provisional algebraic hash
         run: cargo test -p nymora-crypto --no-default-features
+      - name: Test the lifecycle without the provisional algebraic hash
+        run: cargo test -p nymora-protocol --no-default-features
       - name: License headers
         run: ./scripts/check-license-headers.sh

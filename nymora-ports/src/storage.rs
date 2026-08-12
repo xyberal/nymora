@@ -83,12 +83,38 @@ pub enum Slot {
     /// necessity rather than by choice.
     RootOpening,
 
+    /// The credential's root public key, `pk_root` (§9.1) — written once at creation.
+    ///
+    /// Public in nature — Skiora holds the commitment, never this — but it is a witness on
+    /// every routine proof, since opening the leaf requires the committed value, and
+    /// `KeyStore` deliberately has no read-it-back operation: creation is the only moment a
+    /// backend is required to produce it.
+    RootPublicKey,
+
     /// `sk_epoch` for one epoch (§9.1).
     ///
     /// Keyed by epoch because deletion is driven by the epoch **ending**, not by a successor
     /// being certified (proposal 0007). A member who has not acted recently certifies nothing,
     /// and must still end up holding no usable key.
     EpochKey(Epoch),
+
+    /// The epoch certificate record for one epoch (§9.1) — the epoch public key and the
+    /// root signature over its canonical payload, which every routine proof takes as a
+    /// private witness.
+    ///
+    /// Stored rather than re-signed per proof: signing sits behind the root authority, which
+    /// may require user presence (§9.2), and the certificate is verified inside the proof
+    /// rather than shown to anyone. Deleted on the same sweep as the key it certifies.
+    EpochCert(Epoch),
+
+    /// The member's own record of the last epoch it certified.
+    ///
+    /// Exists because this port deliberately refuses enumeration: epoch-end cleanup must know
+    /// which epoch slots may exist without listing anything, so the lifecycle sweeps from this
+    /// cursor to the present, leaning on [`delete`](SecureStorage::delete)'s idempotence. It
+    /// names an epoch number, not an action, and sits inside the same agora-scoped store as
+    /// the keys it tracks — it discloses nothing they do not.
+    EpochCursor,
 
     /// A routing tag key for one epoch (§6.4).
     ///
@@ -212,19 +238,35 @@ mod tests {
         assert_ne!(Slot::TagKey(Epoch::new(7)), Slot::TagKey(Epoch::new(8)));
     }
 
-    /// Two kinds of key material for the same epoch are different slots.
+    /// Two kinds of per-epoch material for the same epoch are different slots.
     #[test]
     fn slot_kinds_do_not_collide_within_an_epoch() {
-        assert_ne!(Slot::EpochKey(Epoch::new(3)), Slot::TagKey(Epoch::new(3)));
+        let at = Epoch::new(3);
+        assert_ne!(Slot::EpochKey(at), Slot::TagKey(at));
+        assert_ne!(Slot::EpochKey(at), Slot::EpochCert(at));
+        assert_ne!(Slot::EpochCert(at), Slot::TagKey(at));
     }
 
     /// The durable slots carry no epoch, and are therefore never deleted by a rollover.
     #[test]
     fn durable_slots_are_not_epoch_scoped() {
-        assert_ne!(Slot::CredentialKey, Slot::RootOpening);
+        let durable = [
+            Slot::CredentialKey,
+            Slot::RootOpening,
+            Slot::RootPublicKey,
+            Slot::EpochCursor,
+        ];
+        for (i, a) in durable.iter().enumerate() {
+            for b in &durable[i + 1..] {
+                assert_ne!(a, b);
+            }
+        }
         for epoch in [0, 1, u64::MAX] {
-            assert_ne!(Slot::CredentialKey, Slot::EpochKey(Epoch::new(epoch)));
-            assert_ne!(Slot::RootOpening, Slot::TagKey(Epoch::new(epoch)));
+            for slot in &durable {
+                assert_ne!(*slot, Slot::EpochKey(Epoch::new(epoch)));
+                assert_ne!(*slot, Slot::EpochCert(Epoch::new(epoch)));
+                assert_ne!(*slot, Slot::TagKey(Epoch::new(epoch)));
+            }
         }
     }
 

@@ -8,7 +8,21 @@ rust-version.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = ["provisional-algebraic-hash"]
+# Forwards `nymora-crypto`'s stand-in for the not-yet-chosen algebraic hash. The lifecycle
+# operations that recompute a leaf or derive a nullifier sit behind this; the sequencing
+# that does not (epoch rollover, sweeps, records) compiles without it.
+provisional-algebraic-hash = ["nymora-crypto/provisional-algebraic-hash"]
+
 [dependencies]
 nymora-core = { path = "../nymora-core" }
+nymora-crypto = { path = "../nymora-crypto", default-features = false }
 nymora-proofs = { path = "../nymora-proofs" }
-nymora-accumulator = { path = "../nymora-accumulator" }
+nymora-accumulator = { path = "../nymora-accumulator", default-features = false }
+nymora-ports = { path = "../nymora-ports" }
+# Memory hygiene for secret bytes staged in local buffers, same version as `nymora-core`.
+zeroize = { version = "1", default-features = false }
+
+[dev-dependencies]
+nymora-ports = { path = "../nymora-ports", features = ["software-key-store"] }

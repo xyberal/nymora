@@ -67,6 +67,29 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   actionable consequence is stated where implementers previously had to infer it: size depth
   generously at creation, where the cost is logarithmic — depth 32 is roughly four billion
   leaves at thirty-two siblings per witness.
+- The credential lifecycle of §9.1–§9.3 in `nymora-protocol` — its first real module, and,
+  deliberately, the only crate that *drives* the two ports: creation (root authority first,
+  durable slots second, unwound on failure so a partial credential cannot exist), epoch
+  certification and rollover with the §9.1 destroy-on-epoch-end sweep, and planned
+  migration on both devices. Sequencing lives in the engine because the ordering carries
+  the security properties — a host asked to remember the epoch-end delete would eventually
+  forget it. Randomness is a parameter, not a port, extending the treatment of time: fresh
+  key material arrives as a consume-once `FreshEntropy` carrying §5.1's
+  never-from-a-shared-seed rule, while the epoch keypair arrives as the host's signature
+  scheme produced it, since that scheme is fixed with the proving system.
+- The planned-migration handoff (§9.3) as a canonical encoding in `nymora-core` — the one
+  wire format that carries a secret, since moving `sk_cred` between two devices the same
+  member controls is its purpose. Version-led, length-framed, strictly decoded, with the
+  transport obligations (local and deliberate, never through Skiora, buffer destroyed after
+  decode) stated where an implementer will look. It deliberately omits the old credential's
+  hardware binding: the migration certificate fully replaces it, and the successor presents
+  its own.
+- Three `SecureStorage` slots: `RootPublicKey` (a witness on every routine proof, and
+  `KeyStore` deliberately has no read-it-back operation), `EpochCert(Epoch)` (the epoch
+  public key and root signature a routine proof takes as private witnesses — stored rather
+  than re-signed per proof, since signing may sit behind a user-presence prompt), and
+  `EpochCursor` (the member's own record of the last epoch it certified, which is what lets
+  epoch-end cleanup sweep without the enumeration the port refuses).
 
 ### Changed
 - Specification §9.1: the credential leaf commits to its agora —

@@ -20,7 +20,7 @@ platform-specific. The core therefore cannot *contain* any of that.
 | Port | Host implements with | Covers |
 |---|---|---|
 | `KeyStore` | iOS Secure Enclave · Android StrongBox · CLI software · FIDO2 key | The credential's root authority: creating it, signing epoch certificates and migrations, and reporting what the backend can actually do (§9.2) |
-| `SecureStorage` | Platform keychain / encrypted store | `sk_cred`, `r_root`, per-epoch `sk_epoch` and tag keys, cached roots (§8.3) |
+| `SecureStorage` | Platform keychain / encrypted store | `sk_cred`, `r_root`, `pk_root`, per-epoch `sk_epoch` with its certificate record, tag keys, the member's epoch cursor, cached roots (§8.3) |
 
 Keeping the engine pure is what makes it testable without mocks of the physical world, and
 what lets a single audited implementation serve every client — a security property in its
@@ -74,9 +74,17 @@ nymora-core          types, wire formats, domain registry, errors
    │      ├── nymora-accumulator    fixed-depth Merkle accumulator (§5.2)
    │      └── nymora-circuits       the one standardized ZK circuit (§6.5)
    │             └── nymora-proofs  attest / vouch / policy-check / live-auth
-   │                    └── nymora-protocol   state machines, both roles
    └── nymora-ports         KeyStore / SecureStorage
+
+nymora-protocol      credential lifecycle (§9.1–§9.3); state machines, both roles
+   └── depends on everything above, including the ports
 ```
 
 Dependencies point one way only. `nymora-protocol` is the top of the graph: it defines the
-state machines and message contracts that a conformant Skiora and Persora must follow.
+lifecycle and the state machines and message contracts that a conformant Skiora and Persora
+must follow — and it is, deliberately, the only crate that *drives* the ports rather than
+merely defining or implementing them. The lifecycle's ordering carries security properties
+(an epoch key destroyed when its epoch ends **is** the forward-secrecy bound of §9.1), and
+one audited implementation of that sequencing is the same argument as one shared circuit —
+a host asked to remember the ordering would eventually forget it. Everything below stays
+port-free.

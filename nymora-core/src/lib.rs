@@ -36,6 +36,7 @@ mod digest;
 mod domain;
 mod epoch;
 mod error;
+mod handoff;
 mod policy;
 mod secret;
 
@@ -48,6 +49,7 @@ pub use digest::{
 pub use domain::Domain;
 pub use epoch::Epoch;
 pub use error::{LocalReason, ProtocolError, Rejection};
+pub use handoff::{MigrationHandoff, HANDOFF_VERSION};
 pub use policy::PolicyClass;
 pub use secret::{CredentialKey, EpochSecretKey, RootOpening, SecretBytes, TagKey};
 
