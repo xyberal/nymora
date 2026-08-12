@@ -12,11 +12,11 @@
 
 use nymora_core::{
     AgoraId, CeremonyMode, Commitment, Domain, Epoch, MessageHash, Nullifier, PublicParameters,
-    TagKey,
+    SessionContext, TagKey,
 };
 #[cfg(feature = "provisional-algebraic-hash")]
 use nymora_core::{CredentialKey, EpochSecretKey, RootOpening};
-use nymora_crypto::{agora_id, derive_tag_key, kdf, policy_class, tag, ByteHasher};
+use nymora_crypto::{agora_id, derive_tag_key, kdf, live_auth, policy_class, tag, ByteHasher};
 #[cfg(feature = "provisional-algebraic-hash")]
 use nymora_crypto::{commit, nullifier};
 use serde::Deserialize;
@@ -158,6 +158,49 @@ fn every_vector_matches() {
                     check(&construction.name, case, routed.as_bytes());
                 }
 
+                "live_auth_commitment" => {
+                    let committed =
+                        live_auth::commitment(&array(case, "nonce"), &array(case, "blinding"));
+                    check(&construction.name, case, committed.as_bytes());
+                }
+
+                "live_auth_context" => {
+                    let mut nonces: Vec<[u8; 32]> = case["nonces"]
+                        .as_array()
+                        .expect("nonces is an array")
+                        .iter()
+                        .map(|nonce| {
+                            let hex = nonce.as_str().expect("nonce is a hex string");
+                            bytes(&serde_json::json!({ "v": hex }), "v")
+                                .try_into()
+                                .expect("nonce is 32 bytes")
+                        })
+                        .collect();
+                    let derived = live_auth::context(&mut nonces, &bytes(case, "channel_metadata"));
+                    check(&construction.name, case, derived.as_bytes());
+                }
+
+                // The one construction whose output is not 32 bytes: the SAS is short by
+                // design, so it is compared directly rather than through `check`.
+                "live_auth_sas" => {
+                    let short = live_auth::sas(&SessionContext::from_bytes(array(case, "context")));
+                    assert_eq!(
+                        short.as_slice(),
+                        bytes(case, "output"),
+                        "live_auth_sas does not match its vector"
+                    );
+                }
+
+                #[cfg(feature = "provisional-algebraic-hash")]
+                "pseudonym" => {
+                    let derived = live_auth::pseudonym(
+                        &EpochSecretKey::new(array(case, "key")),
+                        &SessionContext::from_bytes(array(case, "context")),
+                        &AgoraId::from_bytes(array(case, "agora_id")),
+                    );
+                    check(&construction.name, case, derived.as_bytes());
+                }
+
                 #[cfg(feature = "provisional-algebraic-hash")]
                 "commit" => {
                     let leaf = commit(
@@ -205,10 +248,10 @@ fn every_vector_matches() {
 
     // A harness that silently ran nothing would pass forever. Cheap insurance, and the same
     // failure the secret scan was once found to have.
-    assert!(checked >= 11, "only {checked} settled vectors ran");
+    assert!(checked >= 14, "only {checked} settled vectors ran");
     #[cfg(feature = "provisional-algebraic-hash")]
     assert!(
-        checked >= 13,
+        checked >= 20,
         "only {checked} vectors ran with the stand-in enabled"
     );
 }

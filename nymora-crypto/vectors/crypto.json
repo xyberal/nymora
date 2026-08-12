@@ -143,6 +143,62 @@
       ]
     },
     {
+      "name": "live_auth_commitment",
+      "spec": "§8.1",
+      "status": "settled",
+      "cases": [
+        {
+          "name": "fixed-pair",
+          "nonce": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "blinding": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "output": "2196e0fc4f1f2651004aab75720cf48a6678ff4690c0a1ff3f6fcfef81ce50cb"
+        }
+      ]
+    },
+    {
+      "name": "live_auth_context",
+      "spec": "§8.1",
+      "status": "settled",
+      "cases": [
+        {
+          "name": "three-participants-unsorted-input",
+          "nonces": [
+            "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "1111111111111111111111111111111111111111111111111111111111111111",
+            "7777777777777777777777777777777777777777777777777777777777777777"
+          ],
+          "channel_metadata": "6368616e6e656c2d31",
+          "output": "4ea2808c276f2ebd696aa369fd7fde1125fd3e3d661b0de04e0e700599a8f003"
+        }
+      ]
+    },
+    {
+      "name": "live_auth_sas",
+      "spec": "§8.3",
+      "status": "settled",
+      "cases": [
+        {
+          "name": "fixed-context",
+          "context": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "output": "ba74ea85"
+        }
+      ]
+    },
+    {
+      "name": "pseudonym",
+      "spec": "§8.1",
+      "status": "provisional",
+      "cases": [
+        {
+          "name": "session",
+          "key": "5555555555555555555555555555555555555555555555555555555555555555",
+          "context": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "agora_id": "9999999999999999999999999999999999999999999999999999999999999999",
+          "output": "45c12859854f28db8b9a336476e949601f9435b96ac5d1dd71efb736c5308e38"
+        }
+      ]
+    },
+    {
       "name": "derive_tag_key",
       "spec": "\u00a76.4",
       "status": "settled",

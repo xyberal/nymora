@@ -83,6 +83,20 @@ digest_newtype! {
     /// to authorship, or to any other context.
     SessionPseudonym,
 
+    /// A participant's commitment in the live-authentication commit-reveal round (§8.1).
+    ///
+    /// Binds a nonce and blinding before any participant reveals either, so nobody can
+    /// choose their contribution after seeing another's. Not to be confused with
+    /// [`Commitment`], the accumulator leaf — the two never meet.
+    SessionCommitment,
+
+    /// The jointly-derived context of one live-authentication session, `context_id` (§8.1).
+    ///
+    /// Depends on a nonce from every participant, combined by hash so that no coalition
+    /// short of the whole session can bias it. Everything session-scoped — pseudonyms, the
+    /// SAS — derives from this value.
+    SessionContext,
+
     /// An entry in a credential's hash-chained receipt ledger (§10.2).
     ///
     /// Reserved: the ledger is deferred (proposal 0010); the type stays with its domain tags.

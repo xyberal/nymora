@@ -8,8 +8,29 @@ rust-version.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = ["provisional-algebraic-hash", "stub-prover"]
+# The action API derives nullifiers and pseudonyms and names the statement types, all of
+# which sit behind the stand-in algebraic hash.
+provisional-algebraic-hash = [
+    "nymora-crypto/provisional-algebraic-hash",
+    "nymora-accumulator/provisional-algebraic-hash",
+    "nymora-circuits/provisional-algebraic-hash",
+]
+# Forwarded so a caller can select the whole phase-4 proving stack through this crate.
+stub-prover = ["provisional-algebraic-hash", "nymora-circuits/stub-prover"]
+
 [dependencies]
 nymora-core = { path = "../nymora-core" }
-nymora-crypto = { path = "../nymora-crypto" }
-nymora-accumulator = { path = "../nymora-accumulator" }
-nymora-circuits = { path = "../nymora-circuits" }
+nymora-crypto = { path = "../nymora-crypto", default-features = false }
+nymora-accumulator = { path = "../nymora-accumulator", default-features = false }
+nymora-circuits = { path = "../nymora-circuits", default-features = false }
+
+[dev-dependencies]
+# Tests build the trees and sets the proofs are cut against, through the stub backend.
+nymora-accumulator = { path = "../nymora-accumulator", default-features = false, features = [
+    "build",
+] }
+nymora-circuits = { path = "../nymora-circuits", default-features = false, features = [
+    "stub-prover",
+] }

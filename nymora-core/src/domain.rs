@@ -72,6 +72,19 @@ domains! {
     /// Hashing two children into an interior accumulator node (§5.2).
     AccumulatorNode => "nymora/v0/accumulator/node",
 
+    /// Hashing an excluded key into a leaf of an exclusion set (§9.1, §11).
+    ///
+    /// The revocation set and the migration-spend set are keyed accumulators supporting
+    /// non-membership witnesses — normative in §9.1's currency clauses, though the tree
+    /// structure computing them is fixed with the proving system and currently provisional.
+    /// The tags name the *context*, which survives whatever structure arrives. Distinct from
+    /// [`Domain::AccumulatorLeaf`] for the same substitution reasons, and additionally so a
+    /// membership path and a non-membership path can never be confused for each other.
+    ExclusionLeaf => "nymora/v0/exclusion/leaf",
+
+    /// Hashing two children into an interior exclusion-set node (§9.1, §11).
+    ExclusionNode => "nymora/v0/exclusion/node",
+
     /// The one-time certificate authorizing migration to new hardware (§9.3).
     ///
     /// Distinct from [`Domain::EpochCertificate`]: both are signed by `sk_root`, and a

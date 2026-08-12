@@ -423,6 +423,8 @@ POST /agora/{agora_id}/verify
   → { valid: true }
 ```
 
+The membership proof in either form is the full chain of §9.1 — that statement is normative there, and only its final clause varies by action. For verification access the final clause binds a **Skiora-issued, single-use challenge** into the Fiat–Shamir transcript, exactly as an authorship proof binds `message_hash` (§6.5), and carries **no nullifier**: access is not a count, so there is nothing for a nullifier to enforce, and a credential-derived artifact per lookup would disclose more than the accepted baseline — that some current member of the class asked — for no property in return. Replay is closed by the challenge being single-use, not by distinctness bookkeeping (proposal 0019).
+
 Because a member must prove standing before receiving a root, verification is an online operation requiring live contact with Skiora — consistent with Skiora already being relied upon for root distribution, tag-key distribution, and content gating.
 
 ---
@@ -466,9 +468,11 @@ Sorting the nonces makes the input canonical without any participant identifier,
 
 **Step 4 — each participant posts one pseudonym and proof against the shared context:**
 ```
-pseudonym_i = Hash(sk_i, "conversation", context_id)
+pseudonym_i = Hash(sk_epoch, context_id, agora_id)   -- under the live-auth pseudonym domain tag
 proof_i = ZK(membership ∧ pseudonym_i correctly derived)
 ```
+
+The key is the **epoch key**, by the rule that a distinctness key is scoped to the window it guards (§9.1): a pseudonym guards continuity within one conversation, nothing is counted across sessions, and a durable key would let whoever later obtains it recompute the pseudonym for every recorded session the credential ever joined — retroactive presence attribution, the same class of linkage authorship avoids by using `sk_epoch`. The `agora_id` is absorbed even though `context_id` incorporates every participant's fresh nonce: cross-agora distinctness must hold by construction rather than rest on every client's randomness being correct or on key material having been generated fresh per agora (§5.1; proposals 0013, 0017, 0018).
 
 **Step 5 — everyone independently verifies every posted proof** against the same `context_id` and the current `Root_tier_K`.
 
@@ -541,6 +545,8 @@ Every participant's Persora collects every other participant's commitment, then 
 ```
 SAS = short_digest(context_id)   // e.g., a 6-digit code or short emoji sequence
 ```
+
+`short_digest` is protocol, not presentation: participants compare the value *across* devices, so every implementation must compute the same one. It is the byte-family hash of `context_id` under the SAS domain tag, truncated to its first 4 bytes. How those bytes render — digits, words, emoji — is the client's choice, but the bytes every client derives and compares are these.
 
 Every participant reads their Persora's SAS aloud, or holds it up, and the group confirms all codes match before trusting the session. If any participant's `context_id` was manipulated — for instance, by a relayed or substituted nonce from someone not actually in the room — that Persora's SAS will not match the others, and the discrepancy is caught immediately by the people present, rather than depending on any cryptographic transport guarantee. This is a case where the human verifier is the strongest available check, precisely because it does not rely on trusting the channel at all.
 
@@ -624,7 +630,8 @@ Every ordinary proof — authoring content, vouching, policy approval, live auth
 
 ```
 ∃ sk_epoch, sk_cred, r_root, pk_epoch, epoch_cert, merkle_path, exclusion_witnesses such that:
-  epoch_cert verifies as a valid signature over pk_epoch, by some pk_root committed in Root_tier2
+  pk_epoch is the public counterpart of sk_epoch
+  ∧ epoch_cert verifies as a valid signature over pk_epoch, by some pk_root committed in Root_tier2
   ∧ sk_cred and r_root together open that credential's committed leaf
   ∧ that leaf is absent from the revocation set at the current epoch (§11)
   ∧ Hash(sk_cred, leaf, agora_id) is absent from the migration-spend set (§9.3)
@@ -632,6 +639,8 @@ Every ordinary proof — authoring content, vouching, policy approval, live auth
 ```
 
 Both `sk_cred` and `r_root` appear as witnesses because the leaf commits to both (above); a statement naming only `r_root` cannot open it.
+
+The correspondence clause is stated rather than left to the reader, because omitting it disconnects the certificate from the key that acts: with `sk_epoch` and `pk_epoch` as independent witnesses, the certificate would prove the root certified *some* key while the nullifier derived from an arbitrary, never-certified one — making certification decorative for exactly the operations it exists to authorize. What "public counterpart" means concretely is the signature scheme's key derivation, fixed with the proving system (§6.5).
 
 The revocation-set root and migration-spend root are public inputs alongside the accumulator root; a verifier accepts a routine proof only against the current epoch's three roots. Both sets are keyed accumulators supporting non-membership witnesses — a structure distinct from the positional accumulator of §5.2, fixed with the proving system (§6.5). The two non-membership clauses are what make §5.2's definition of a current credential a proven fact rather than a verifier's unaided obligation.
 

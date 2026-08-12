@@ -26,9 +26,12 @@
 //!
 //! Until the proving system is chosen, the algebraic family is a documented stand-in behind
 //! the `provisional-algebraic-hash` feature, on by default; see [`algebraic`] for what that
-//! means and what it would cost to ship. Building with `--no-default-features` removes the
-//! stand-in and everything derived through it — [`commit`] and [`nullifier`] — leaving only
-//! the constructions that are settled.
+//! means and what it would cost to ship. The root-authority signature scheme sits on the
+//! same fault line — both certificates are verified inside the circuit (§9.1, §9.3) — and
+//! is likewise a stand-in, behind `provisional-signature`; see [`signature`]. Building with
+//! `--no-default-features` removes both stand-ins and everything derived through them —
+//! [`commit`], [`nullifier`], and [`signature`] — leaving only the constructions that are
+//! settled.
 
 #![no_std]
 
@@ -39,9 +42,12 @@ pub mod algebraic;
 pub mod commit;
 pub mod hash;
 pub mod kdf;
+pub mod live_auth;
 #[cfg(feature = "provisional-algebraic-hash")]
 pub mod nullifier;
 pub mod policy_class;
+#[cfg(feature = "provisional-signature")]
+pub mod signature;
 pub mod tag;
 
 #[cfg(feature = "provisional-algebraic-hash")]

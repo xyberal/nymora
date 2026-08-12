@@ -8,6 +8,36 @@ rust-version.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = ["provisional-algebraic-hash", "stub-prover"]
+# The statement types embed the provisional witness structures (positional and exclusion),
+# and every clause is expressed over the stand-in algebraic hash — so the statements
+# themselves are gated, exactly like the values they quantify over.
+provisional-algebraic-hash = [
+    "nymora-crypto/provisional-algebraic-hash",
+    "nymora-accumulator/provisional-algebraic-hash",
+]
+# The stub prover: a plaintext evaluator of the exact statements, for building and testing
+# everything above the proof boundary before the real circuit exists. Its proofs contain
+# the witness in the clear — see the module documentation — and must never leave a test
+# process. It additionally needs the provisional signature, since two of the clauses verify
+# root-key signatures.
+stub-prover = [
+    "provisional-algebraic-hash",
+    "nymora-crypto/provisional-signature",
+    "dep:sha2",
+]
+
 [dependencies]
 nymora-core = { path = "../nymora-core" }
-nymora-crypto = { path = "../nymora-crypto" }
+nymora-crypto = { path = "../nymora-crypto", default-features = false }
+nymora-accumulator = { path = "../nymora-accumulator", default-features = false }
+# Stub only, for the local public-input binding digest — a value with no counterparty,
+# like the software key store's seed derivations.
+sha2 = { version = "0.10", default-features = false, optional = true }
+
+[dev-dependencies]
+# Tests build the trees and sets the statements are proven against.
+nymora-accumulator = { path = "../nymora-accumulator", default-features = false, features = [
+    "build",
+] }

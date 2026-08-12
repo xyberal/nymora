@@ -70,13 +70,21 @@ bit-for-bit across every implementation or the protocol simply fails to interope
 ```
 nymora-core          types, wire formats, domain registry, errors
    ├── nymora-crypto        hashing (byte + provisional algebraic), commitments,
-   │                        nullifiers, tags, KDF, identifier derivations
-   │      ├── nymora-accumulator    fixed-depth Merkle accumulator (§5.2)
-   │      └── nymora-circuits       the one standardized ZK circuit (§6.5)
-   │             └── nymora-proofs  attest / vouch / policy-check / live-auth
+   │                        nullifiers, tags, KDF, identifier and live-auth
+   │                        derivations, the provisional signature
+   │      ├── nymora-accumulator    positional accumulator (§5.2) and the keyed
+   │      │        │                exclusion sets with non-membership witnesses
+   │      │        │                (§9.1, §11)
+   │      └────────┴── nymora-circuits   the two proof statements as types, the
+   │             │                       `ProofSystem` boundary, and — until the
+   │             │                       real circuit — the stub prover (§6.5)
+   │             └── nymora-proofs       the per-action prove/verify surface
    └── nymora-ports         KeyStore / SecureStorage
+                            (`software-key-store` also uses the provisional
+                             signature from nymora-crypto)
 
-nymora-protocol      credential lifecycle (§9.1–§9.3); state machines, both roles
+nymora-protocol      credential lifecycle (§9.1–§9.3) and witness assembly into the
+   │                 statements; the state machines of both roles, in a later phase
    └── depends on everything above, including the ports
 ```
 

@@ -12,10 +12,14 @@ workspace = true
 # A reference `KeyStore` for development and tests. Off by default: it is not production
 # custody, and a library that shipped it enabled invites exactly the accident it is named
 # to prevent. `just ci` builds with `--all-features`, so it is covered.
-software-key-store = ["dep:sha2"]
+software-key-store = ["dep:sha2", "dep:nymora-crypto"]
 
 [dependencies]
 nymora-core = { path = "../nymora-core" }
-# Used only by `software-key-store`, and only for values no counterparty recomputes — see
-# that module on why it does not reach for `nymora-crypto`.
+# Used only by `software-key-store`: sha2 for the local seed derivations no counterparty
+# recomputes, nymora-crypto for the provisional signature the stub prover *does* verify —
+# see that module on where the boundary between the two lies.
 sha2 = { version = "0.10", default-features = false, optional = true }
+nymora-crypto = { path = "../nymora-crypto", default-features = false, features = [
+    "provisional-signature",
+], optional = true }

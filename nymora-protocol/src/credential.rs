@@ -386,11 +386,13 @@ pub fn create_successor_root(
 
 /// Authorizes a planned migration on the old device, producing the encoded handoff (§9.3).
 ///
-/// Signs the canonical [`MigrationCertPayload`] over the successor's public key, recomputes
-/// this credential's leaf from its stored material, and writes the [`MigrationHandoff`] —
-/// `sk_cred`, the certificate, the consumed leaf — into `out`, returning its length. The
-/// handoff carries the durable secret; the transport rules in `nymora-core`'s handoff
-/// module are the caller's obligations from this point.
+/// Signs the canonical [`MigrationCertPayload`] over the successor's public key and writes
+/// the [`MigrationHandoff`] — `sk_cred`, `r_root`, `pk_root`, the certificate — into
+/// `out`, returning its length. That is everything the migration *proof* needs about the
+/// predecessor, because the successor is the prover: the statement it proves opens the old
+/// leaf, and the leaf itself is derived from these values rather than carried. The handoff
+/// carries the durable secret; the transport rules in `nymora-core`'s handoff module are
+/// the caller's obligations from this point.
 ///
 /// Nothing is deleted here. The old leaf stays valid until the successor's migration is
 /// verified and the spend enters the exclusion roots at the boundary (§9.3); when the old
@@ -402,7 +404,6 @@ pub fn create_successor_root(
 /// [`ProtocolError::Unavailable`] if no credential is stored for `agora` (or its stored
 /// material is corrupt); [`ProtocolError::Malformed`] for short caller buffers; port errors
 /// unchanged.
-#[cfg(feature = "provisional-algebraic-hash")]
 pub fn authorize_migration(
     agora: AgoraId,
     key_store: &dyn KeyStore,
@@ -418,8 +419,6 @@ pub fn authorize_migration(
         .load(agora, Slot::RootPublicKey, root_public_key)?
         .ok_or(ProtocolError::Unavailable)?;
 
-    let consumed_leaf = commit(&root_public_key[..pk_len], &sk_cred, &r_root, &agora);
-
     let payload = MigrationCertPayload {
         agora,
         successor_public_key,
@@ -429,7 +428,8 @@ pub fn authorize_migration(
     MigrationHandoff {
         agora,
         credential_key: sk_cred,
-        consumed_leaf,
+        root_opening: r_root,
+        root_public_key: &root_public_key[..pk_len],
         migration_cert: &signature[..sig_len],
     }
     .encode(out)
@@ -466,7 +466,15 @@ pub fn complete_migration(
 
     let r_root = RootOpening::new(root_opening.take());
     let commitment = commit(root_public_key, &handoff.credential_key, &r_root, &agora);
-    let spend = nullifier::migration(&handoff.credential_key, &handoff.consumed_leaf, &agora);
+    // The consumed leaf is derived from the handoff, never carried in it — a derived value
+    // cannot disagree with the material the migration proof opens it with.
+    let consumed_leaf = commit(
+        handoff.root_public_key,
+        &handoff.credential_key,
+        &handoff.root_opening,
+        &agora,
+    );
+    let spend = nullifier::migration(&handoff.credential_key, &consumed_leaf, &agora);
 
     store_credential_material(
         storage,
@@ -503,7 +511,7 @@ fn checked_span(cursor: Epoch, current: Epoch) -> Result<Epoch, ProtocolError> {
 }
 
 /// Loads a 32-byte secret slot into a zeroizing buffer.
-fn load_secret32(
+pub(crate) fn load_secret32(
     agora: AgoraId,
     storage: &dyn SecureStorage,
     slot: Slot,
@@ -717,8 +725,10 @@ mod tests {
         assert_eq!(record.public_key, &[0xcc; 32]);
 
         // The stored signature is exactly the backend's signature over the canonical
-        // payload — recomputable because the software backend is deterministic.
-        let mut expected = [0u8; 32];
+        // payload — recomputable because the software backend is deterministic. The buffer
+        // is generous rather than sized to the scheme: the stand-in's signature width is
+        // deliberately unpinned here.
+        let mut expected = [0u8; 128];
         let len = key_store()
             .sign_epoch_cert(
                 &EpochCertPayload {
@@ -889,9 +899,18 @@ mod tests {
         )
         .expect("authorization succeeds");
 
-        // Successor decodes and completes.
+        // Successor decodes and completes. The consumed leaf is no longer carried — it is
+        // derived from the handoff's witness material, and must equal the leaf created.
         let handoff = MigrationHandoff::decode(&handoff_bytes[..len]).expect("handoff decodes");
-        assert_eq!(handoff.consumed_leaf, old.commitment);
+        assert_eq!(
+            commit(
+                handoff.root_public_key,
+                &handoff.credential_key,
+                &handoff.root_opening,
+                &AGORA_A,
+            ),
+            old.commitment
+        );
 
         let mut new_device = TestStore::default();
         let migrated = complete_migration(
@@ -924,11 +943,14 @@ mod tests {
     #[test]
     #[cfg(feature = "provisional-algebraic-hash")]
     fn each_migration_of_a_lineage_spends_its_own_nullifier() {
-        let sign = |leaf: u8| {
+        // Varying the old opening varies the derived consumed leaf — two migrations of one
+        // lineage, two distinct spends.
+        let sign = |opening: u8| {
             let handoff = MigrationHandoff {
                 agora: AGORA_A,
                 credential_key: CredentialKey::new([0x44; 32]),
-                consumed_leaf: Commitment::from_bytes([leaf; 32]),
+                root_opening: RootOpening::new([opening; 32]),
+                root_public_key: &[0x11; 32],
                 migration_cert: b"cert",
             };
             let mut store = TestStore::default();
@@ -946,7 +968,8 @@ mod tests {
         let handoff = MigrationHandoff {
             agora: AGORA_B,
             credential_key: CredentialKey::new([0x44; 32]),
-            consumed_leaf: Commitment::from_bytes([0xaa; 32]),
+            root_opening: RootOpening::new([0x22; 32]),
+            root_public_key: &[0x11; 32],
             migration_cert: b"cert",
         };
         let mut store = TestStore::default();
@@ -1067,11 +1090,13 @@ mod tests {
         .unwrap();
 
         // The spend an identical adversarial migration in B would produce is unrelated.
-        let spend_in_b = nullifier::migration(
-            &CredentialKey::new([0x44; 32]),
-            &handoff.consumed_leaf,
-            &AGORA_B,
+        let consumed = commit(
+            handoff.root_public_key,
+            &handoff.credential_key,
+            &handoff.root_opening,
+            &AGORA_A,
         );
+        let spend_in_b = nullifier::migration(&CredentialKey::new([0x44; 32]), &consumed, &AGORA_B);
         assert_ne!(migrated.spend, spend_in_b);
         assert_ne!(migrated.commitment, second.commitment);
         assert!(

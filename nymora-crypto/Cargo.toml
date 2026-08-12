@@ -9,11 +9,15 @@ rust-version.workspace = true
 workspace = true
 
 [features]
-default = ["provisional-algebraic-hash"]
+default = ["provisional-algebraic-hash", "provisional-signature"]
 # SHA-256 standing in for the not-yet-chosen algebraic hash, plus the commitments and
 # nullifiers derived through it. On by default so the protocol can be built; disable to
 # check that the stand-in has not reached something it should not have.
 provisional-algebraic-hash = []
+# Ed25519 standing in for the not-yet-chosen in-circuit signature scheme (§6.5 fixes it
+# with the proving system). Same discipline as the hash: on by default, stripped by
+# --no-default-features, sizes never pinned by tests.
+provisional-signature = ["dep:ed25519-dalek"]
 
 [dependencies]
 nymora-core = { path = "../nymora-core" }
@@ -25,6 +29,12 @@ hkdf = { version = "0.12", default-features = false }
 hmac = { version = "0.12", default-features = false }
 # Constant-time comparison and branchless selection for the tag trial loop (§16.4).
 subtle = { version = "2", default-features = false }
+# The provisional signature only. `digest` enables the prehashed (streaming) API, which is
+# what lets signing work without an allocator; `zeroize` erases expanded key material.
+ed25519-dalek = { version = "2", default-features = false, features = [
+    "digest",
+    "zeroize",
+], optional = true }
 
 [dev-dependencies]
 # Conformance vectors are JSON so a second implementation in another language can consume them.

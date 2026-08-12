@@ -10,15 +10,22 @@ workspace = true
 
 [features]
 default = ["provisional-algebraic-hash"]
-# Forwards `nymora-crypto`'s stand-in for the not-yet-chosen algebraic hash. The lifecycle
-# operations that recompute a leaf or derive a nullifier sit behind this; the sequencing
-# that does not (epoch rollover, sweeps, records) compiles without it.
-provisional-algebraic-hash = ["nymora-crypto/provisional-algebraic-hash"]
+# Forwards the stand-ins through the whole proof stack. The lifecycle operations that
+# recompute a leaf or derive a nullifier, and the witness-assembly path into the statement
+# types, sit behind this; the sequencing that does not (epoch rollover, sweeps, records)
+# compiles without it.
+provisional-algebraic-hash = [
+    "nymora-crypto/provisional-algebraic-hash",
+    "nymora-accumulator/provisional-algebraic-hash",
+    "nymora-circuits/provisional-algebraic-hash",
+    "nymora-proofs/provisional-algebraic-hash",
+]
 
 [dependencies]
 nymora-core = { path = "../nymora-core" }
 nymora-crypto = { path = "../nymora-crypto", default-features = false }
-nymora-proofs = { path = "../nymora-proofs" }
+nymora-circuits = { path = "../nymora-circuits", default-features = false }
+nymora-proofs = { path = "../nymora-proofs", default-features = false }
 nymora-accumulator = { path = "../nymora-accumulator", default-features = false }
 nymora-ports = { path = "../nymora-ports" }
 # Memory hygiene for secret bytes staged in local buffers, same version as `nymora-core`.
@@ -26,3 +33,14 @@ zeroize = { version = "1", default-features = false }
 
 [dev-dependencies]
 nymora-ports = { path = "../nymora-ports", features = ["software-key-store"] }
+# The cross-phase tests sign epoch certificates the stub verifies, build the trees and
+# sets proofs are cut against, and prove through the stub backend.
+nymora-crypto = { path = "../nymora-crypto", default-features = false, features = [
+    "provisional-signature",
+] }
+nymora-accumulator = { path = "../nymora-accumulator", default-features = false, features = [
+    "build",
+] }
+nymora-circuits = { path = "../nymora-circuits", default-features = false, features = [
+    "stub-prover",
+] }

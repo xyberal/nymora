@@ -9,6 +9,12 @@
 //!
 //! See `../../nymora-crypto/vectors/README.md` for the settled/provisional distinction.
 
+// Everything in this harness exercises the provisional algebraic structures, and building the
+// trees needs the `build` feature — without either, there is nothing to check. (The crypto
+// crate's harness instead skips case-by-case, because it mixes settled and provisional vectors;
+// this one is provisional throughout.)
+#![cfg(all(feature = "provisional-algebraic-hash", feature = "build"))]
+
 use nymora_accumulator::{hash_leaf, hash_node, root_from, Node, Tree, Witness};
 use nymora_core::Commitment;
 use serde::Deserialize;

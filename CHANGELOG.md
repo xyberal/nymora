@@ -90,8 +90,83 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   than re-signed per proof, since signing may sit behind a user-presence prompt), and
   `EpochCursor` (the member's own record of the last epoch it certified, which is what lets
   epoch-end cleanup sweep without the enumeration the port refuses).
+- The **provisional signature** in `nymora-crypto` (`provisional-signature` feature, on by
+  default): Ed25519, standing in for the in-circuit signature scheme that is fixed with the
+  proving system, exactly as the algebraic hash stands in for the circuit's hash. It exists
+  because the stub prover must *publicly verify* both root certificates while holding only
+  `pk_root` — the moment the software key store's keyed-hash stand-ins were documented to
+  end at. `SoftwareKeyStore` now signs with it, deterministically from the same per-agora
+  seeds; nothing pins its sizes, which move with the scheme.
+- Live-authentication derivations (§8.1, §8.3) in `nymora-crypto`: the commit-reveal
+  commitment, the jointly-derived session context (count absorbed, nonces sorted and
+  framed, channel metadata last), and the SAS — byte-family, settled, with permanent
+  vectors — plus the session pseudonym, which the circuit recomputes and is therefore
+  algebraic-family and provisional. Session sequencing (commit-before-reveal, duplicate
+  abort, late-joiner refresh) is deliberately absent here: it is a phase-5 state machine.
+- The keyed exclusion sets of §9.1's currency clauses in `nymora-accumulator` — the
+  revocation set (§11) and the migration-spend set (§9.3) — as a provisional sparse Merkle
+  tree over the key's 256 bits with **non-membership witnesses**: a keyed root, an
+  `AbsenceWitness`, and allocation-free, constant-time-in-the-path `verifies_absent`. The
+  real structure is fixed with the proving system; what is pinned is the shape the
+  protocol builds against, which is why the module sits behind the same provisional
+  feature as the positional witness. Construction (`ExclusionSet`: insert, root, witness
+  serving) is operator-side behind `build`, idempotent, permanent, and — carrying §5.2's
+  discipline over — reports no occupancy, since a revocation count is information about
+  members. Two new permanent domain tags separate its leaves and nodes from the positional
+  accumulator's, so a membership path and a non-membership path can never be confused.
+- The two proof statements as types, and the proving-system boundary, in `nymora-circuits`:
+  §9.1's membership chain as one witness set with the action-specific final clause as a
+  variant — authorship, vouch, policy approval, live auth, verification access — so a new
+  kind of proof is a new variant rather than a new shape (§6.5 made structural); the
+  migration statement (§9.3) deliberately beside it, not inside it, since a migration
+  proof never leaves the agora. The `ProofSystem` trait returns §6.5's single bit, must
+  refuse an unsatisfiable witness at prove time, and binds every proof to exactly its
+  public inputs. Behind it, for now: the **stub prover** (`stub-prover` feature, on by
+  default) — a plaintext evaluator of every clause, honest in semantics (nothing is
+  asserted a circuit could not prove) and loudly dishonest in disclosure (its proofs
+  contain the witness, must never leave a test process, and redact themselves in `Debug`).
+  Its public-input binding is an explicit transcript digest, because re-evaluation alone
+  would accept an action swap the Fiat–Shamir binding must refuse.
+- The per-action proof surface in `nymora-proofs`: prove and verify entry points for all
+  six actions, deriving each nullifier and pseudonym from the witness rather than
+  accepting one — a caller can no longer mismatch a final clause and its derivation — and
+  `EpochRoots` carrying the current epoch's three roots as one value so roots from two
+  epochs cannot be mixed invisibly (§9.1).
+- Witness assembly in `nymora-protocol` (`load_acting_material`): everything the phase-3
+  lifecycle stored, loaded back as the chain witness a proof consumes. A swept epoch
+  refuses here as `Unavailable` — §9.1's destroy-on-epoch-end becoming an inability to
+  prove is the forward-secrecy bound made executable, and the cross-phase tests observe it
+  end to end. The Merkle and absence witnesses stay parameters: they come from Skiora,
+  and fetching is I/O, which is the host's.
 
 ### Changed
+- Specification §9.1: the membership chain states `pk_epoch is the public counterpart of
+  sk_epoch` explicitly. Implementing the statement types surfaced that the clause was
+  implied but absent — and without it the certificate constrains nothing about the key the
+  nullifier derives from, making certification decorative for exactly the operations it
+  exists to authorize.
+- Specification §7: the verification-access proof statement is now specified — the full
+  chain with a final clause binding a Skiora-issued, single-use challenge, and **no
+  nullifier**, since access is not a count and replay is closed by challenge freshness
+  (proposal 0019).
+- The migration handoff carries the predecessor's `r_root` and `pk_root` instead of the
+  consumed leaf. The successor is the prover — it submits `credentials/migrate` — and the
+  migration statement opens the old leaf, which takes the opening material; the leaf
+  itself is now derived from what the handoff carries, since a derived value cannot
+  disagree with the values it derives from. Layout changed in place with
+  `HANDOFF_VERSION` unchanged: nothing has shipped, and the version byte exists for
+  deployed formats, not drafts. `authorize_migration` no longer needs the provisional
+  hash and loses its feature gate.
+- Specification §8.1: the live-auth pseudonym is
+  `Hash(sk_epoch, context_id, agora_id)` under its registered domain tag — the key pinned
+  to the epoch tier by 0005's window rule (a durable key would permit retroactive *presence*
+  attribution for every recorded session), and the agora absorbed by construction rather
+  than resting on every participant's randomness being correct (proposal 0018). The
+  informal `"conversation"` literal is subsumed by the domain tag.
+- Specification §8.3: `short_digest` is pinned — the byte-family hash of `context_id`
+  under the SAS domain tag, truncated to its first 4 bytes. Participants compare the value
+  across devices, so the digest and truncation are protocol; only the rendering (digits,
+  words, emoji) is the client's.
 - Specification §9.1: the credential leaf commits to its agora —
   `Commit(pk_root, sk_cred, r_root, agora_id)`. §5.1 already listed commitments among the
   values that may not be derivable across agoras, and the construction did not comply; the

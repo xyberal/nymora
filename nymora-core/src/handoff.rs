@@ -3,21 +3,28 @@
 //! The planned-migration handoff and its canonical encoding (§9.3).
 //!
 //! When a member moves to a new device, the old device — after signing the migration
-//! certificate over the successor's freshly generated root key — hands the successor three
-//! things it cannot proceed without: `sk_cred`, which carries across the lineage and is not
-//! regenerated; the certificate authorizing exactly this transition; and the leaf being
-//! consumed, from which the successor derives the migration nullifier
-//! `Hash(sk_cred, leaf_old, agora_id)`. This module is that handoff as bytes.
+//! certificate over the successor's freshly generated root key — hands the successor
+//! everything the migration *proof* needs about the predecessor, because the successor is
+//! the prover: it is the device that submits `credentials/migrate`, and the statement it
+//! proves must open the old leaf. That takes four things: `sk_cred`, which carries across
+//! the lineage and is not regenerated; the old credential's `r_root` and `pk_root`, which
+//! together with `sk_cred` open `Commit(pk_root, sk_cred, r_root, agora_id)`; and the
+//! certificate authorizing exactly this transition. This module is that handoff as bytes.
 //!
-//! # This is the one encoding that carries a secret
+//! The consumed leaf itself is deliberately **not** carried: it is derivable from what is,
+//! and a derived value cannot disagree with the values it derives from — carrying both
+//! would create the one inconsistency this format could otherwise never represent.
+//!
+//! # This is the one encoding that carries secrets
 //!
 //! Every other wire format in this crate is public material. The handoff exists to move
-//! `sk_cred` between two devices the same member controls, so the secret in the bytes is the
-//! point, not a leak — but it makes the transport rules absolute: §9.3 requires the transfer
-//! be local and deliberate (the same class of channel as §8.3's commitment exchange), it must
-//! never transit Skiora or any network service, and the host must destroy its copy of the
-//! encoded buffer once decoded. An adversary holding these bytes holds the §15 durable-key
-//! position *plus* a signed authorization for one successor.
+//! `sk_cred` (and `r_root`, which rides with it) between two devices the same member
+//! controls, so the secrets in the bytes are the point, not a leak — but it makes the
+//! transport rules absolute: §9.3 requires the transfer be local and deliberate (the same
+//! class of channel as §8.3's commitment exchange), it must never transit Skiora or any
+//! network service, and the host must destroy its copy of the encoded buffer once decoded.
+//! An adversary holding these bytes holds the §15 durable-key position *plus* a signed
+//! authorization for one successor.
 //!
 //! # Why it is canonical anyway
 //!
@@ -36,9 +43,9 @@
 //! verifier would consume.
 
 use crate::agora::AgoraId;
-use crate::digest::{Commitment, DIGEST_LEN};
+use crate::digest::DIGEST_LEN;
 use crate::error::ProtocolError;
-use crate::secret::CredentialKey;
+use crate::secret::{CredentialKey, RootOpening};
 
 /// The wire format this module reads and writes.
 ///
@@ -46,14 +53,14 @@ use crate::secret::CredentialKey;
 /// [`FORMAT_VERSION`](crate::FORMAT_VERSION) for the argument.
 pub const HANDOFF_VERSION: u8 = 1;
 
-/// Width of the length prefix on the variable-length field.
+/// Width of the length prefix on each variable-length field.
 const LENGTH_PREFIX: usize = core::mem::size_of::<u64>();
 
 /// What the old device hands the successor in a planned migration (§9.3).
 ///
-/// Owned where the material is secret, borrowed where it is not: `credential_key` is a
-/// [`CredentialKey`] so that decoding produces a value that redacts, zeroizes, and resists
-/// casual duplication, while the certificate stays a borrow of the caller's buffer.
+/// Owned where the material is secret, borrowed where it is not: `credential_key` and
+/// `root_opening` decode into values that redact, zeroize, and resist casual duplication,
+/// while the public key and certificate stay borrows of the caller's buffer.
 ///
 /// Not `Clone`, deliberately — the handoff exists in as few places as possible.
 #[derive(Debug, PartialEq, Eq)]
@@ -66,8 +73,12 @@ pub struct MigrationHandoff<'a> {
     pub agora: AgoraId,
     /// `sk_cred`, carried across the lineage — never regenerated (§9.3).
     pub credential_key: CredentialKey,
-    /// The old leaf this migration consumes, bound into the migration nullifier.
-    pub consumed_leaf: Commitment,
+    /// The old credential's `r_root` — a witness the migration proof opens the old leaf
+    /// with. It does not survive into the successor credential, whose opening is fresh.
+    pub root_opening: RootOpening,
+    /// The old credential's `pk_root` — the key the migration certificate verifies under,
+    /// inside the proof, never in the clear (§9.3).
+    pub root_public_key: &'a [u8],
     /// The root signature over the canonical [`MigrationCertPayload`] encoding.
     ///
     /// The signature alone: the payload is recomputed by the verifying circuit from values
@@ -81,7 +92,13 @@ impl<'a> MigrationHandoff<'a> {
     /// The exact number of bytes [`encode`](Self::encode) will write.
     #[must_use]
     pub const fn encoded_len(&self) -> usize {
-        1 + DIGEST_LEN + DIGEST_LEN + DIGEST_LEN + LENGTH_PREFIX + self.migration_cert.len()
+        1 + DIGEST_LEN
+            + DIGEST_LEN
+            + DIGEST_LEN
+            + LENGTH_PREFIX
+            + self.root_public_key.len()
+            + LENGTH_PREFIX
+            + self.migration_cert.len()
     }
 
     /// Writes the canonical encoding into `out`, returning the number of bytes written.
@@ -106,7 +123,9 @@ impl<'a> MigrationHandoff<'a> {
         put(&[HANDOFF_VERSION]);
         put(self.agora.as_bytes());
         put(self.credential_key.expose());
-        put(self.consumed_leaf.as_bytes());
+        put(self.root_opening.expose());
+        put(&(self.root_public_key.len() as u64).to_le_bytes());
+        put(self.root_public_key);
         put(&(self.migration_cert.len() as u64).to_le_bytes());
         put(self.migration_cert);
 
@@ -134,19 +153,9 @@ impl<'a> MigrationHandoff<'a> {
 
         let agora = AgoraId::from_bytes(take_digest(&mut rest)?);
         let credential_key = CredentialKey::new(take_digest(&mut rest)?);
-        let consumed_leaf = Commitment::from_bytes(take_digest(&mut rest)?);
-
-        let prefix = rest
-            .get(..LENGTH_PREFIX)
-            .ok_or(ProtocolError::Malformed)?
-            .try_into()
-            .map_err(|_| ProtocolError::Malformed)?;
-        let len =
-            usize::try_from(u64::from_le_bytes(prefix)).map_err(|_| ProtocolError::Malformed)?;
-        let migration_cert = rest
-            .get(LENGTH_PREFIX..LENGTH_PREFIX + len)
-            .ok_or(ProtocolError::Malformed)?;
-        rest = &rest[LENGTH_PREFIX + len..];
+        let root_opening = RootOpening::new(take_digest(&mut rest)?);
+        let root_public_key = take_framed(&mut rest)?;
+        let migration_cert = take_framed(&mut rest)?;
 
         if !rest.is_empty() {
             return Err(ProtocolError::Malformed);
@@ -155,7 +164,8 @@ impl<'a> MigrationHandoff<'a> {
         Ok(Self {
             agora,
             credential_key,
-            consumed_leaf,
+            root_opening,
+            root_public_key,
             migration_cert,
         })
     }
@@ -172,22 +182,37 @@ fn take_digest(rest: &mut &[u8]) -> Result<[u8; DIGEST_LEN], ProtocolError> {
     Ok(bytes)
 }
 
+/// Reads a length-prefixed field, advancing `rest`.
+fn take_framed<'a>(rest: &mut &'a [u8]) -> Result<&'a [u8], ProtocolError> {
+    let prefix = rest
+        .get(..LENGTH_PREFIX)
+        .ok_or(ProtocolError::Malformed)?
+        .try_into()
+        .map_err(|_| ProtocolError::Malformed)?;
+    let len = usize::try_from(u64::from_le_bytes(prefix)).map_err(|_| ProtocolError::Malformed)?;
+    let body = rest
+        .get(LENGTH_PREFIX..LENGTH_PREFIX + len)
+        .ok_or(ProtocolError::Malformed)?;
+    *rest = &rest[LENGTH_PREFIX + len..];
+    Ok(body)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{MigrationHandoff, HANDOFF_VERSION};
     use crate::agora::AgoraId;
-    use crate::digest::Commitment;
     use crate::error::ProtocolError;
-    use crate::secret::CredentialKey;
+    use crate::secret::{CredentialKey, RootOpening};
     use std::format;
     use std::vec;
     use std::vec::Vec;
 
-    fn sample(cert: &[u8]) -> MigrationHandoff<'_> {
+    fn sample<'a>(public_key: &'a [u8], cert: &'a [u8]) -> MigrationHandoff<'a> {
         MigrationHandoff {
             agora: AgoraId::from_bytes([0x7e; 32]),
             credential_key: CredentialKey::new([0x44; 32]),
-            consumed_leaf: Commitment::from_bytes([0xab; 32]),
+            root_opening: RootOpening::new([0x22; 32]),
+            root_public_key: public_key,
             migration_cert: cert,
         }
     }
@@ -211,30 +236,40 @@ mod tests {
         let mut expected = vec![HANDOFF_VERSION];
         expected.extend_from_slice(&[0x7e; 32]);
         expected.extend_from_slice(&[0x44; 32]);
-        expected.extend_from_slice(&[0xab; 32]);
+        expected.extend_from_slice(&[0x22; 32]);
+        expected.extend_from_slice(&3u64.to_le_bytes());
+        expected.extend_from_slice(&[0xcc; 3]);
         expected.extend_from_slice(&4u64.to_le_bytes());
         expected.extend_from_slice(&[0xdd; 4]);
-        assert_eq!(encoded(&sample(&[0xdd; 4])), expected);
+        assert_eq!(encoded(&sample(&[0xcc; 3], &[0xdd; 4])), expected);
     }
 
     #[test]
     fn round_trips_byte_exactly() {
-        let handoff = sample(b"cert-bytes");
+        let handoff = sample(b"public-key", b"cert-bytes");
         let bytes = encoded(&handoff);
         let decoded = MigrationHandoff::decode(&bytes).expect("valid encoding");
         assert_eq!(decoded, handoff);
         assert_eq!(encoded(&decoded), bytes, "encoding is not canonical");
     }
 
+    /// Two adjacent framed fields: their boundary must not be movable, or bytes could slide
+    /// between the public key and the certificate.
     #[test]
-    fn an_empty_certificate_is_framed_not_elided() {
-        assert_ne!(encoded(&sample(&[])), encoded(&sample(&[0x00])));
-        MigrationHandoff::decode(&encoded(&sample(&[]))).expect("empty cert is representable");
+    fn the_framed_field_boundary_is_not_movable() {
+        assert_ne!(encoded(&sample(b"ab", b"c")), encoded(&sample(b"a", b"bc")));
+    }
+
+    #[test]
+    fn empty_variable_fields_are_framed_not_elided() {
+        assert_ne!(encoded(&sample(b"", b"")), encoded(&sample(b"", b"\0")));
+        MigrationHandoff::decode(&encoded(&sample(b"", b"")))
+            .expect("empty variable fields are representable");
     }
 
     #[test]
     fn truncation_is_rejected_at_every_length() {
-        let bytes = encoded(&sample(b"cert"));
+        let bytes = encoded(&sample(b"pk", b"cert"));
         for cut in 0..bytes.len() {
             assert_eq!(
                 MigrationHandoff::decode(&bytes[..cut]),
@@ -246,7 +281,7 @@ mod tests {
 
     #[test]
     fn trailing_bytes_are_rejected() {
-        let mut bytes = encoded(&sample(b"cert"));
+        let mut bytes = encoded(&sample(b"pk", b"cert"));
         bytes.push(0);
         assert_eq!(
             MigrationHandoff::decode(&bytes),
@@ -256,7 +291,7 @@ mod tests {
 
     #[test]
     fn an_unknown_version_is_rejected() {
-        let mut bytes = encoded(&sample(b"cert"));
+        let mut bytes = encoded(&sample(b"pk", b"cert"));
         bytes[0] = HANDOFF_VERSION + 1;
         assert_eq!(
             MigrationHandoff::decode(&bytes),
@@ -266,29 +301,36 @@ mod tests {
 
     #[test]
     fn an_overstated_length_is_rejected() {
-        let mut bytes = encoded(&sample(b"cert"));
-        let prefix_at = 1 + 32 + 32 + 32;
-        bytes[prefix_at] = 0xff;
-        assert_eq!(
-            MigrationHandoff::decode(&bytes),
-            Err(ProtocolError::Malformed)
-        );
+        for framed_field in 0..2 {
+            let mut bytes = encoded(&sample(b"pk", b"cert"));
+            let prefix_at = match framed_field {
+                0 => 1 + 32 + 32 + 32,
+                _ => 1 + 32 + 32 + 32 + 8 + 2,
+            };
+            bytes[prefix_at] = 0xff;
+            assert_eq!(
+                MigrationHandoff::decode(&bytes),
+                Err(ProtocolError::Malformed),
+                "framed field {framed_field} accepted an overstated length"
+            );
+        }
     }
 
     #[test]
     fn a_short_buffer_is_refused() {
-        let handoff = sample(b"cert");
+        let handoff = sample(b"pk", b"cert");
         let mut buffer = vec![0u8; handoff.encoded_len() - 1];
         assert_eq!(handoff.encode(&mut buffer), Err(ProtocolError::Malformed));
     }
 
-    /// The struct must not leak `sk_cred` through `Debug` — it is the one wire type
-    /// carrying a secret, so the redaction it inherits from [`CredentialKey`] is checked
-    /// here by name rather than assumed.
+    /// The struct must not leak its secrets through `Debug` — it is the one wire type
+    /// carrying them, so the redaction it inherits from [`CredentialKey`] and
+    /// [`RootOpening`] is checked here by name rather than assumed.
     #[test]
-    fn debug_does_not_leak_the_credential_key() {
-        let rendered = format!("{:?}", sample(b"cert"));
+    fn debug_does_not_leak_the_secrets() {
+        let rendered = format!("{:?}", sample(b"pk", b"cert"));
         assert!(!rendered.contains("44, 44"), "sk_cred leaked: {rendered}");
+        assert!(!rendered.contains("22, 22"), "r_root leaked: {rendered}");
         assert!(rendered.contains("redacted"), "{rendered}");
     }
 }

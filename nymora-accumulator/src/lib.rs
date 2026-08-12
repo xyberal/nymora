@@ -33,11 +33,17 @@
 
 #![no_std]
 
+#[cfg(feature = "provisional-algebraic-hash")]
+pub mod exclusion;
 #[cfg(feature = "build")]
 pub mod tree;
 #[cfg(feature = "provisional-algebraic-hash")]
 pub mod witness;
 
+#[cfg(all(feature = "provisional-algebraic-hash", feature = "build"))]
+pub use exclusion::ExclusionSet;
+#[cfg(feature = "provisional-algebraic-hash")]
+pub use exclusion::{absent_root_from, verifies_absent, AbsenceWitness};
 #[cfg(feature = "build")]
 pub use tree::Tree;
 #[cfg(feature = "provisional-algebraic-hash")]

@@ -16,44 +16,46 @@
 //! Callers exercising the variance path against this backend see the weakest case from the first
 //! day, rather than discovering it when a hardware backend arrives and behaves differently.
 //!
-//! # Why the signatures are not signatures
+//! # The signatures are real now, and provisional
 //!
-//! They are keyed hashes. The real construction cannot be chosen yet: §9.3 wants a migration
-//! certificate verified inside a proof rather than transmitted in the clear, so the scheme is
-//! constrained by the proving system — the same fault line that leaves the algebraic hash
-//! provisional in `nymora-crypto`. Anything committed now would be committing to that decision
-//! by implication.
+//! Through phase 3 this backend's "signatures" were keyed hashes, on a documented premise:
+//! nothing verified them, and nothing should, because the real scheme is fixed with the proving
+//! system (§6.5) and anything committed early would prejudge that choice. The stub prover ended
+//! the premise — it must check "this certificate verifies under `pk_root`" holding only the
+//! public key, and no keyed hash is verifiable by the holder of a public value alone. So the
+//! backend now signs with the **provisional signature** in `nymora-crypto`: publicly
+//! verifiable, deterministic from the same per-agora seeds as before, and exactly as much a
+//! stand-in as the algebraic hash — sizes and algorithm move when the proving system is chosen,
+//! and nothing here or in any test pins them.
 //!
-//! Nothing verifies these values, and nothing should. They exist so that callers exercise the
-//! buffer, length, and error paths of the port before a real backend exists.
+//! # Where `nymora-crypto` begins and ends here
 //!
-//! # Why this does not use `nymora-crypto`
+//! The per-agora seed derivations remain local keyed hashes over local separators: they have no
+//! counterparty, are never recomputed by anyone else, and registering stand-in entries in the
+//! permanent protocol domain-tag registry would be a worse trade than the few lines of framing
+//! below. The signatures are the opposite case — the stub verifier recomputes exactly what was
+//! signed — so they come from `nymora-crypto`, where every value with a counterparty must live
+//! or two implementations will eventually disagree.
 //!
-//! Domain-separated hashing belongs there, and every value with a counterparty must come from
-//! it, or two implementations will eventually disagree. These values have no counterparty: they
-//! are local, never interoperable, and never recomputed by anyone else. Reaching for
-//! `nymora-crypto` would have meant adding stand-in entries to a permanent public domain-tag
-//! registry, which is a worse trade than the few lines of framing below.
-//!
-//! The prefixes here are deliberately **not** shaped like `nymora/v0/...` protocol domain tags,
-//! so that no one mistakes one for the other. Protocol tags do appear in what the signing
-//! methods absorb — but as part of the canonical certificate payloads from `nymora-core`,
-//! which are the message being signed, not this backend's own separation.
+//! The local prefixes are deliberately **not** shaped like `nymora/v0/...` protocol domain
+//! tags, so that no one mistakes one for the other. Protocol tags do appear in what the signing
+//! methods absorb — but as part of the canonical certificate payloads from `nymora-core`, which
+//! are the message being signed, not this backend's own separation.
 
 use crate::key_store::{
     Capabilities, EpochCertPayload, KeyStore, MigrationCertPayload, RootMaterialOut,
     RootMaterialWritten,
 };
 use nymora_core::{AgoraId, ProtocolError, SecretBytes, DIGEST_LEN};
+use nymora_crypto::signature;
 use sha2::{Digest, Sha256};
 
-/// Separators for this backend's derivations. Local to it, not protocol domain tags.
+/// Separator for this backend's root-seed derivation. Local to it, not a protocol domain tag.
 ///
-/// The two signing methods absorb the canonical certificate payload, which already leads
-/// with a protocol domain tag, so a single local separator suffices there: the kinds are
-/// separated inside the message, exactly as they will be for a real signature scheme.
+/// One separator suffices: the only local derivation is the per-agora signing seed, and the
+/// two certificate kinds are separated inside the messages they sign by the protocol domain
+/// tag leading each canonical payload.
 const ROOT: &[u8] = b"software-key-store/v0/root";
-const SIGN: &[u8] = b"software-key-store/v0/sign";
 
 /// Absorbs a length prefix before the bytes.
 ///
@@ -66,11 +68,11 @@ fn framed(hasher: &mut Sha256, bytes: &[u8]) {
 }
 
 /// Writes `value` into `out`, or reports that the caller's buffer is too small.
-fn put(out: &mut [u8], value: &[u8; DIGEST_LEN]) -> Result<usize, ProtocolError> {
-    out.get_mut(..DIGEST_LEN)
+fn put(out: &mut [u8], value: &[u8]) -> Result<usize, ProtocolError> {
+    out.get_mut(..value.len())
         .ok_or(ProtocolError::Malformed)?
         .copy_from_slice(value);
-    Ok(DIGEST_LEN)
+    Ok(value.len())
 }
 
 /// A software-only root authority. See the module documentation before using it for anything.
@@ -94,35 +96,33 @@ impl SoftwareKeyStore {
         }
     }
 
-    /// Derives one value, binding the separator, the seed, and every supplied field.
-    fn derive(&self, separator: &[u8], fields: &[&[u8]]) -> [u8; DIGEST_LEN] {
+    /// Derives the signing seed for one agora's root key.
+    ///
+    /// One master seed, one signing seed per agora, one keypair per signing seed: `create_root`
+    /// and both signing methods meet at this derivation, which is what makes the signatures
+    /// verify under the public key `create_root` published.
+    fn root_seed(&self, agora: AgoraId) -> SecretBytes<{ signature::SEED_LEN }> {
         let mut hasher = Sha256::new();
-        framed(&mut hasher, separator);
+        framed(&mut hasher, ROOT);
         framed(&mut hasher, self.seed.expose());
-        for field in fields {
-            framed(&mut hasher, field);
-        }
-        hasher.finalize().into()
+        framed(&mut hasher, agora.as_bytes());
+        SecretBytes::new(hasher.finalize().into())
     }
 
-    /// "Signs" a canonical certificate payload: a keyed hash over exactly its bytes.
+    /// Signs a canonical certificate payload with one agora's root key.
     ///
     /// The payload is streamed through `encode_parts` rather than re-encoded here, so this
     /// backend cannot drift from the layout `nymora-core` pins — the property the `KeyStore`
     /// contract demands of real backends, obeyed by the stand-in for the same reason. The
-    /// framing prefix uses `encoded_len`, keeping the message one framed field like every
-    /// other absorption in this file.
+    /// signed message is exactly the canonical bytes, nothing more: the provisional signature
+    /// adds no framing of its own, precisely so a verifier reconstructing the payload verifies
+    /// the same message.
     fn sign_canonical(
         &self,
-        encoded_len: usize,
+        agora: AgoraId,
         encode_parts: impl FnOnce(&mut dyn FnMut(&[u8])),
-    ) -> [u8; DIGEST_LEN] {
-        let mut hasher = Sha256::new();
-        framed(&mut hasher, SIGN);
-        framed(&mut hasher, self.seed.expose());
-        hasher.update((encoded_len as u64).to_le_bytes());
-        encode_parts(&mut |part: &[u8]| hasher.update(part));
-        hasher.finalize().into()
+    ) -> [u8; signature::SIGNATURE_LEN] {
+        signature::sign(self.root_seed(agora).expose(), encode_parts)
     }
 }
 
@@ -143,7 +143,7 @@ impl KeyStore for SoftwareKeyStore {
         agora: AgoraId,
         out: RootMaterialOut<'_>,
     ) -> Result<RootMaterialWritten, ProtocolError> {
-        let public_key = self.derive(ROOT, &[agora.as_bytes()]);
+        let public_key = signature::public_key(self.root_seed(agora).expose());
         Ok(RootMaterialWritten {
             public_key: put(out.public_key, &public_key)?,
             // Not `Some(0)`: this backend produces no binding at all, which is a different
@@ -157,7 +157,7 @@ impl KeyStore for SoftwareKeyStore {
         payload: &EpochCertPayload<'_>,
         signature: &mut [u8],
     ) -> Result<usize, ProtocolError> {
-        let value = self.sign_canonical(payload.encoded_len(), |put| payload.encode_parts(put));
+        let value = self.sign_canonical(payload.agora, |put| payload.encode_parts(put));
         put(signature, &value)
     }
 
@@ -166,7 +166,7 @@ impl KeyStore for SoftwareKeyStore {
         payload: &MigrationCertPayload<'_>,
         signature: &mut [u8],
     ) -> Result<usize, ProtocolError> {
-        let value = self.sign_canonical(payload.encoded_len(), |put| payload.encode_parts(put));
+        let value = self.sign_canonical(payload.agora, |put| payload.encode_parts(put));
         put(signature, &value)
     }
 }
@@ -176,6 +176,7 @@ mod tests {
     use super::SoftwareKeyStore;
     use crate::key_store::{EpochCertPayload, KeyStore, MigrationCertPayload, RootMaterialOut};
     use nymora_core::{AgoraId, Epoch, ProtocolError, DIGEST_LEN};
+    use nymora_crypto::signature;
     use std::format;
 
     const SEED: [u8; DIGEST_LEN] = [0x5a; DIGEST_LEN];
@@ -186,8 +187,8 @@ mod tests {
         SoftwareKeyStore::new(SEED)
     }
 
-    fn root_of(store: &SoftwareKeyStore, agora: AgoraId) -> [u8; DIGEST_LEN] {
-        let mut public_key = [0u8; DIGEST_LEN];
+    fn root_of(store: &SoftwareKeyStore, agora: AgoraId) -> [u8; signature::PUBLIC_KEY_LEN] {
+        let mut public_key = [0u8; signature::PUBLIC_KEY_LEN];
         let mut binding = [0u8; DIGEST_LEN];
         let written = store
             .create_root(
@@ -198,7 +199,7 @@ mod tests {
                 },
             )
             .expect("buffers are large enough");
-        assert_eq!(written.public_key, DIGEST_LEN);
+        assert_eq!(written.public_key, public_key.len());
         public_key
     }
 
@@ -207,8 +208,8 @@ mod tests {
         agora: AgoraId,
         epoch: u64,
         key: &[u8],
-    ) -> [u8; DIGEST_LEN] {
-        let mut signature = [0u8; DIGEST_LEN];
+    ) -> [u8; signature::SIGNATURE_LEN] {
+        let mut sig = [0u8; signature::SIGNATURE_LEN];
         let written = store
             .sign_epoch_cert(
                 &EpochCertPayload {
@@ -216,25 +217,29 @@ mod tests {
                     epoch: Epoch::new(epoch),
                     epoch_public_key: key,
                 },
-                &mut signature,
+                &mut sig,
             )
             .expect("buffer is large enough");
-        assert_eq!(written, DIGEST_LEN);
-        signature
+        assert_eq!(written, sig.len());
+        sig
     }
 
-    fn migration(store: &SoftwareKeyStore, agora: AgoraId, target: &[u8]) -> [u8; DIGEST_LEN] {
-        let mut signature = [0u8; DIGEST_LEN];
+    fn migration(
+        store: &SoftwareKeyStore,
+        agora: AgoraId,
+        target: &[u8],
+    ) -> [u8; signature::SIGNATURE_LEN] {
+        let mut sig = [0u8; signature::SIGNATURE_LEN];
         store
             .sign_migration(
                 &MigrationCertPayload {
                     agora,
                     successor_public_key: target,
                 },
-                &mut signature,
+                &mut sig,
             )
             .expect("buffer is large enough");
-        signature
+        sig
     }
 
     /// The whole point of 1.8: callers must see the weakest case from the first day.
@@ -249,7 +254,7 @@ mod tests {
     /// A backend reporting no binding must return `None`, not an empty one.
     #[test]
     fn it_produces_no_binding() {
-        let mut public_key = [0u8; DIGEST_LEN];
+        let mut public_key = [0u8; signature::PUBLIC_KEY_LEN];
         let mut binding = [0u8; DIGEST_LEN];
         let written = store()
             .create_root(
@@ -285,33 +290,78 @@ mod tests {
         assert_ne!(root_of(&store(), AGORA_A), root_of(&other, AGORA_A));
     }
 
-    /// Each derivation must be separated from the others.
-    ///
-    /// Root material is separated from signatures by the local separators; the two
-    /// certificate kinds are separated from each other by the protocol domain tag leading
-    /// each canonical payload — the same separation a real signature scheme will rely on.
-    /// Without either, two of these values over the same agora would be the same 32 bytes,
-    /// and one could be presented as the other.
+    /// The property phase 4 exists to use: what this backend signs, anyone holding the
+    /// public key from `create_root` can verify — including the stub prover recomputing
+    /// the canonical payload from witness values.
     #[test]
-    fn the_three_derivations_do_not_collide() {
+    fn an_epoch_cert_verifies_under_the_created_root() {
+        let store = store();
+        let payload = EpochCertPayload {
+            agora: AGORA_A,
+            epoch: Epoch::new(7),
+            epoch_public_key: &[0xcc; 32],
+        };
+        let sig = epoch_cert(&store, AGORA_A, 7, &[0xcc; 32]);
+        assert!(signature::verify(
+            &root_of(&store, AGORA_A),
+            |put| payload.encode_parts(put),
+            &sig
+        ));
+    }
+
+    #[test]
+    fn a_migration_cert_verifies_under_the_created_root() {
+        let store = store();
+        let payload = MigrationCertPayload {
+            agora: AGORA_A,
+            successor_public_key: &[0xee; 32],
+        };
+        let sig = migration(&store, AGORA_A, &[0xee; 32]);
+        assert!(signature::verify(
+            &root_of(&store, AGORA_A),
+            |put| payload.encode_parts(put),
+            &sig
+        ));
+    }
+
+    /// The two certificate kinds must not be confusable, and now that the signatures are
+    /// verifiable the property is checked the way an attacker would probe it: a signature
+    /// produced as one kind, presented as the other, must not verify. The separation comes
+    /// from the protocol domain tag leading each canonical payload, not from anything local
+    /// to this backend.
+    #[test]
+    fn one_certificate_kind_does_not_verify_as_the_other() {
         let store = store();
         let root = root_of(&store, AGORA_A);
-        assert_ne!(root, epoch_cert(&store, AGORA_A, 0, &[]));
-        assert_ne!(root, migration(&store, AGORA_A, &[]));
-        assert_ne!(
-            epoch_cert(&store, AGORA_A, 0, &[]),
-            migration(&store, AGORA_A, &[])
-        );
+        let epoch_sig = epoch_cert(&store, AGORA_A, 0, &[0xcc; 32]);
+        let migration_payload = MigrationCertPayload {
+            agora: AGORA_A,
+            successor_public_key: &[0xcc; 32],
+        };
+        assert!(!signature::verify(
+            &root,
+            |put| migration_payload.encode_parts(put),
+            &epoch_sig
+        ));
     }
 
     /// The requirement stated on `KeyStore`: a certificate must not replay across agoras.
+    /// Two properties compound here — the payload names its agora, and each agora's root is
+    /// a different key entirely.
     #[test]
-    fn an_epoch_cert_binds_its_agora() {
+    fn an_epoch_cert_does_not_verify_in_another_agora() {
         let store = store();
-        assert_ne!(
-            epoch_cert(&store, AGORA_A, 7, &[0xcc; 32]),
-            epoch_cert(&store, AGORA_B, 7, &[0xcc; 32])
-        );
+        let sig = epoch_cert(&store, AGORA_A, 7, &[0xcc; 32]);
+        let replayed = EpochCertPayload {
+            agora: AGORA_B,
+            epoch: Epoch::new(7),
+            epoch_public_key: &[0xcc; 32],
+        };
+        assert!(!signature::verify(
+            &root_of(&store, AGORA_B),
+            |put| replayed.encode_parts(put),
+            &sig
+        ));
     }
 
     #[test]
@@ -332,9 +382,9 @@ mod tests {
 
     /// Field boundaries must not be movable.
     ///
-    /// The epoch is fixed-width, but the epoch public key is not, so without length framing a
-    /// key whose leading bytes absorbed the neighbouring field would produce a colliding
-    /// certificate.
+    /// The epoch is fixed-width, but the epoch public key is not, so without length framing
+    /// in the canonical payload a key whose leading bytes absorbed the neighbouring field
+    /// would produce a colliding certificate.
     #[test]
     fn field_boundaries_are_not_malleable() {
         let store = store();
@@ -351,7 +401,8 @@ mod tests {
     #[test]
     fn a_short_buffer_is_refused() {
         let store = store();
-        let mut too_small = [0u8; DIGEST_LEN - 1];
+        let mut short_sig = [0u8; signature::SIGNATURE_LEN - 1];
+        let mut short_key = [0u8; signature::PUBLIC_KEY_LEN - 1];
         let mut binding = [0u8; DIGEST_LEN];
 
         assert_eq!(
@@ -360,7 +411,7 @@ mod tests {
                     agora: AGORA_A,
                     successor_public_key: &[],
                 },
-                &mut too_small,
+                &mut short_sig,
             ),
             Err(ProtocolError::Malformed)
         );
@@ -369,7 +420,7 @@ mod tests {
                 .create_root(
                     AGORA_A,
                     RootMaterialOut {
-                        public_key: &mut too_small,
+                        public_key: &mut short_key,
                         binding: &mut binding,
                     },
                 )
