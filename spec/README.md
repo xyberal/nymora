@@ -7,15 +7,27 @@ and **Persora** (client) implementation must do.
 |---|---|
 | [nymora-protocol.md](nymora-protocol.md) | §2–§14 — vocabulary, membership and vouching, content provenance, verification, live authentication, key hierarchy, integrity/auditability, revocation, dissolution, deployment |
 | [threat-model.md](threat-model.md) | §1 — purpose and adversary model · §15 — known limitations and what the design does *not* solve |
-| [proposals/](proposals) | Proposed amendments under review, with the replacement text they would apply |
+| [proposals/](proposals) | The decision record — the argued reasoning behind every normative change |
 
-## Proposals
+## Proposals — how to read them
 
-Changes to a normative section are drafted in `proposals/` before they are applied, so the
-reasoning survives alongside the outcome. Each proposal states the problem, the decision,
-the alternatives rejected and why, the exact replacement text, and its consequences. A
-proposal is applied to the specification only once its status says so; until then the
-sections above remain authoritative.
+The specification above is always the current truth; `proposals/` is *why* it is that
+way. Every change to a normative section is drafted as a proposal first — the problem,
+the decision, the alternatives rejected and why, the consequences — and the proposal
+survives, unedited, after the change lands. Read the spec to learn the protocol; read a
+proposal when a section makes you ask *"why would they do it this way?"*
+
+A proposal's **status** line says how to treat it:
+
+- **Applied** — its content is already in the specification sections above. The proposal
+  is the historical argument, not pending work.
+- **Proposed** — an argued change that has not been applied. The spec text it affects
+  remains authoritative and, where practical, points to the proposal.
+- **Closed** — superseded. Kept, because deleting a decision record hides that the
+  decision was ever different.
+
+Proposals are never edited after the fact except for their status line: corrections land
+in the specification, the code, or a new proposal — an amended record is not a record.
 
 **Protocol version:** `0.0.0` (pre-release; the specification is a design draft and may
 change incompatibly).

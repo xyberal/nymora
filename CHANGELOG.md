@@ -175,6 +175,17 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and fetching is I/O, which is the host's.
 
 ### Changed
+- Specification editorial pass ahead of publication: the illustrative wire snippets and
+  the §4 diagram caught up with the proposals already applied around them — §4.1 no longer
+  shows `credentials/init` returning a credential id and tier (the founder's leaf is placed
+  at creation, the one direct insertion), §4.3 says `execute` over a derived subject rather
+  than `activate` over an issued id, §7's access flow shows the challenge-bound shapes of
+  proposal 0019 instead of the struck `proof_token`/`grant_token`, and §12's dissolution
+  snippet is the §4.3 quorum machine it always was in prose (proposal 0021), with the
+  destruction proof conditioned on §4.4. §4.4 now carries a specified-not-yet-implemented
+  status note. Spec text affected by proposed-but-unapplied proposals now points to them
+  (0001 at §9.2, 0024 at §9.1 and §11). `spec/README.md` describes `proposals/` as the
+  decision record it is, with the status conventions spelled out.
 - §11's whole-set service is now honest in the accumulator: the exclusion-set module no
   longer claims Skiora serves absence witnesses — a witness request naming a key would
   disclose exactly which credential is about to act, so members receive the sets whole

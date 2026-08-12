@@ -100,10 +100,9 @@ sequenceDiagram
     participant Bob
     participant Charlie
 
-    Alice->>Skiora: POST /agora/setup (single-party)
+    Alice->>Skiora: POST /agora/setup (single-party, C_alice)
     Skiora-->>Alice: agora_id, status: active
-    Alice->>Skiora: credentials/init (C_alice)
-    Skiora-->>Alice: cred_alice, tier: Tier2
+    Note over Skiora: founder's leaf placed at creation —<br/>the one direct insertion (§4.1)
 
     Note over Alice,Bob: agora_id shared out-of-band (§3)<br/>real-world vetting happens off-system
 
@@ -112,16 +111,17 @@ sequenceDiagram
 
     Alice->>Skiora: vouch/session/start (candidate: C_bob)
     Alice->>Skiora: attest (proof, N_alice) — threshold-of-1
-    Skiora-->>Alice: finalize: threshold_met = true
-    Skiora->>Skiora: accumulator/tier2/insert (C_bob)
+    Bob->>Skiora: finalize
+    Skiora-->>Bob: threshold_met, position, active_from_epoch
+    Note over Skiora: C_bob staged — lands in the class root<br/>at the boundary (§5.2, proposal 0020)
 
-    Note over Alice,Charlie: Bob now a real member —<br/>threshold policy raised to 2-of-2
+    Note over Alice,Charlie: Bob a member from active_from_epoch —<br/>threshold policy raised to 2-of-2
 
     Charlie->>Skiora: credentials/init (C_charlie)
     Alice->>Skiora: attest (proof, N_alice')
     Bob->>Skiora: attest (proof, N_bob)
-    Skiora-->>Bob: finalize: threshold_met = true
-    Skiora->>Skiora: accumulator/tier2/insert (C_charlie)
+    Charlie->>Skiora: finalize
+    Skiora-->>Charlie: threshold_met, position, active_from_epoch
 
     Note over Alice,Skiora: Re-key: single-party → MPC custody (§4.4)
 ```
@@ -130,13 +130,11 @@ sequenceDiagram
 
 ```
 POST /agora/setup
-  body: { key_ceremony_mode: "single-party" }
+  body: { key_ceremony_mode: "single-party", founder_commitment: C_alice }
   → { agora_id, status: "active" }
-
-POST /agora/{agora_id}/credentials/init
-  body: { commitment: C_alice }
-  → { credential_id: cred_alice, tier: "Tier2" }
 ```
+
+The founder's leaf is placed in the class accumulator at creation itself — the one direct insertion in the agora's history, before any member exists to vouch. It is present from the genesis epoch. Every later credential announces itself through `credentials/init` (§5.3), whose response acknowledges receipt and nothing more — a candidate's standing is established by admission, not by anything this call returns.
 
 This is a known, temporary weak window: for a short period, Alice alone holds the master key material. There is no way around this for a single founder — it is the accepted cost of avoiding a multi-party bootstrap ceremony.
 
@@ -161,9 +159,10 @@ Someone has to be first; a threshold-of-1 admission is an unavoidable structural
 
 ```
 POST /agora/{agora_id}/policy/tier2/propose
-  body: { new_predicate: "threshold=2" }
-POST /agora/{agora_id}/policy/tier2/proposal/{id}/approve   (each existing member)
-POST /agora/{agora_id}/policy/tier2/proposal/{id}/activate
+  body: { new_predicate: "threshold=2", nonce }
+  → { subject }                                    ← derived, not issued (below)
+POST /agora/{agora_id}/policy/tier2/proposal/{subject}/approve   (each existing member)
+POST /agora/{agora_id}/policy/tier2/proposal/{subject}/execute
   → { policy_version: 2 }
 ```
 
@@ -174,6 +173,8 @@ This propose/approve/execute flow is the agora's **one quorum machine** (proposa
 Charlie, Dave, and all future members are vouched in via the identical 2-of-N (or higher) threshold flow. No credential anywhere in the agora carries a "founder" flag or distinct issuance type — every credential is structurally indistinguishable, differing only in the unavoidable fact of when it entered the accumulator.
 
 ### 4.4 Re-key to multi-party custody
+
+**Specified, not yet implemented.** MPC custody is roadmap work alongside hardware custody (§9.2); until it lands, an agora runs under the founding single-party custody for the life of the agora, and §12's provable destruction is correspondingly procedural — best-effort key destruction plus the transparency log's terminal entry (§10.1) — rather than information-theoretic. The section remains normative intent: §12 and §15 argue against it.
 
 Once enough real members exist, the agora re-keys from single-party to threshold (MPC) custody, closing the founder's-sole-custody window:
 
@@ -408,23 +409,26 @@ No `agora_id`, no root, no epoch marker, no pseudonym of any kind is present. Ev
 Verification is restricted to members: only someone who can prove their own current standing in the agora can obtain the root needed to check an attestation.
 
 ```
-POST /agora/{agora_id}/proofs/policy-check
-  body: { proof_token, encrypted_attributes, target_policy_class }
-  → { grant_token }
+GET  /agora/{agora_id}/verify/challenge
+  → { challenge }                          ← single-use, consumed on presentation
+
+POST /agora/{agora_id}/verify/access
+  body: { proof, challenge, policy_class } ← the §9.1 chain, challenge-bound, no nullifier
+  → { access }                             ← scoped to the current epoch, expires at the boundary
 
 POST /agora/{agora_id}/accumulator/{policy_class}/root-at-epoch
-  auth: grant_token
+  auth: access
   body: { epoch }
   → { root_at_epoch }
 ```
 
 A non-member possessing an attestation bundle, even with a correct guess at the content, has no path to a trustworthy root and cannot complete verification.
 
-The two calls can be consolidated into a single authenticated round-trip:
+The grant and the lookup can be consolidated into a single authenticated round-trip:
 
 ```
 POST /agora/{agora_id}/verify
-  auth: verifier's membership proof
+  auth: access
   body: { attestation_proof, message_hash, epoch_hint }
   → { valid: true }
 ```
@@ -622,7 +626,7 @@ The interval is a **maximum**, not a fixed tick: an epoch may be advanced early 
 
 An epoch ends at whichever comes first: the transparency log publishing an advance (§10.1), or the maximum interval elapsing on the local clock. Failing toward the earlier signal is deliberate — a key recognised as expired too late outlives its window and cannot be recovered, while one destroyed too early costs a single re-certification. A member out of contact may still certify a key against the last epoch they know of, and risks rejection if the agora has advanced.
 
-The transparency log is opt-in (§10.1), so it cannot be the only advance signal. For an agora without a log, the authoritative signal is a **signed epoch-advance statement** served by Skiora, distributed on the same member-gated channel that carries the `K_tag_e` broadcast (§6.4); the local-clock maximum remains the backstop, and a member acts on whichever signal arrives first, exactly as above. This matters most where it is least convenient: revocation advances the epoch immediately (§11), and the agoras most likely to decline a log — the most existence-sensitive ones — are also the ones that most need prompt revocation to take effect. An early advance must therefore never depend on a mechanism an agora may have opted out of.
+The transparency log is opt-in (§10.1), so it cannot be the only advance signal. For an agora without a log, the authoritative signal is a **signed epoch-advance statement** served by Skiora, distributed on the same member-gated channel that carries the `K_tag_e` broadcast (§6.4); the local-clock maximum remains the backstop, and a member acts on whichever signal arrives first, exactly as above. This matters most where it is least convenient: revocation advances the epoch immediately (§11), and the agoras most likely to decline a log — the most existence-sensitive ones — are also the ones that most need prompt revocation to take effect. An early advance must therefore never depend on a mechanism an agora may have opted out of. (Proposal 0024, proposed but not yet applied, subsumes this statement into a signed boundary bulletin carrying everything the new epoch fixed; see §11.)
 
 **Nullifier keys are scoped to the window they guard.** A nullifier enforces "at most once" only for the lifetime of the key that produced it, and the verifier has no other handle on identity to fall back on. Authorship (§6.1) uses `sk_epoch`: its window is one epoch, and the paragraphs below explain why it is also the one context where a longer-lived key would cost something.
 
@@ -689,7 +693,7 @@ Compromise of `sk_epoch` and `r_root` (the pair touched by every routine operati
 
 ### 9.2 Hardware-backed custody of the root key
 
-`sk_root` is used rarely (epoch rollover, governance quorum actions) and is catastrophic if exposed — exactly the profile suited to hardware-backed key custody rather than ordinary app-managed storage.
+`sk_root` is used rarely (epoch rollover, governance quorum actions) and is catastrophic if exposed — exactly the profile suited to hardware-backed key custody rather than ordinary app-managed storage. The root key's exact construction — one hardware-resident key, or a two-level construction keeping signature verification affordable inside the circuit — is proposal 0001, deferred until the real circuit's constraint counts are measured; nothing in this section changes shape either way except what stands behind the authenticator interface.
 
 **Mechanism.** Persora delegates generation and use of `sk_root` to a hardware authenticator — a phone's secure enclave (Apple Secure Enclave, Android StrongBox), a discrete security key (YubiKey-class), or an equivalent FIDO2/WebAuthn-compatible element. The authenticator generates it internally, using its own random number generator; it never leaves the hardware in any form, encrypted or otherwise. Persora holds only a reference to the hardware-resident key and requests operations from it:
 
@@ -900,7 +904,7 @@ Revocation itself is decided through the quorum machine of §4.3 (proposal 0021)
 
 Revocation therefore advances the epoch immediately rather than waiting for the schedule (§9.1). The new `K_tag` is broadcast to the remaining members, and the revoked credential receives nothing further. This is what makes the "prompt revocation" named below an available mitigation rather than one capped by the routine epoch interval. It closes future access only: content already resolved cannot be un-resolved, consistent with the absence of any cryptographic undo.
 
-The boundary broadcast carries more than the tag key: it is the members' distribution channel for everything the new epoch fixed — the epoch's canonical roots (proposal 0020), both exclusion sets whole, and `K_tag` — so that every remaining member can refresh witnesses and act without a bootstrap dependency on the member-gated services of §7, which a member could not satisfy at a boundary where anything changed without the very material being distributed. The sets travel whole rather than as deltas: a delta presumes an earlier copy, and a member admitted at that very boundary has none — they would start life unable to compute the absence witnesses their first proof requires. The delivery cut is the security property: what reaches remaining members and not the revoked one is exactly this broadcast.
+The boundary broadcast carries more than the tag key: it is the members' distribution channel for everything the new epoch fixed — the epoch's canonical roots (proposal 0020), both exclusion sets whole, and `K_tag` — so that every remaining member can refresh witnesses and act without a bootstrap dependency on the member-gated services of §7, which a member could not satisfy at a boundary where anything changed without the very material being distributed. The sets travel whole rather than as deltas: a delta presumes an earlier copy, and a member admitted at that very boundary has none — they would start life unable to compute the absence witnesses their first proof requires. The delivery cut is the security property: what reaches remaining members and not the revoked one is exactly this broadcast. The broadcast is not yet authenticated as an object: proposal 0024 (proposed, not yet applied) makes it a signed operator statement, and records why channel security alone is not enough for an artifact meant to be cached and relayed.
 
 The revocation set and the migration-spend set (§9.3) are served to members whole, member-gated like roots (§7), and non-membership witnesses are computed locally by each Persora. A witness request naming a specific leaf would disclose to Skiora exactly which credential is about to act; serving the full set is what keeps the request anonymous, and is affordable because both sets grow with revocations and migrations, never with membership or content.
 
@@ -917,23 +921,22 @@ An early advance also expires any open policy proposal or vouch session (§4.3, 
 Dissolution must make an agora's cryptographic material **provably, irreversibly destroyed** — not merely marked inactive.
 
 ```
-POST /agora/{agora_id}/dissolve/initiate
-  auth: quorum of current trust-committee-eligible credentials
-  → { dissolution_session_id }
+POST /agora/{agora_id}/proposals/propose
+  body: { decision: "dissolution", approving_class, nonce }
+  → { subject }                     ← derived, not issued: Hash(kind_tag; …) per §4.3
 
-POST /agora/{agora_id}/dissolve/{id}/confirm
-  auth: individual member's credential proof
-  body: { confirmation_signature }
+POST /agora/{agora_id}/proposals/{subject}/approve
+  body: { proof, nullifier }        ← the ordinary policy-approval action (§4.3)
   → { status: "recorded" }
 
-POST /agora/{agora_id}/dissolve/{id}/execute
-  [auto-triggered once quorum threshold met]
-  → { status: "keys_destroyed", verifiable_destruction_proof }
+POST /agora/{agora_id}/proposals/{subject}/execute
+  [refused until the governance quorum is met]
+  → { status: "frozen" }
 ```
 
-This flow is the quorum machine of §4.3 without residue (proposal 0021): *initiate* is a proposal whose subject derives under the dissolution domain tag, each *confirm* is an ordinary policy-approval over that subject, and *execute* is the threshold-met execution. Nothing about dissolution's approval arithmetic is bespoke; what is unique to it is the effect.
+This flow is the quorum machine of §4.3 without residue (proposal 0021): the subject derives under the dissolution domain tag, each approval is the ordinary policy-approval action over that subject, and execution requires the governance quorum. Nothing about dissolution's approval arithmetic is bespoke; what is unique to it is the effect. A verifiable destruction proof accompanies execution once MPC custody exists (§4.4, not yet implemented); under single-party custody the response above is all there is, and destruction is procedural — best-effort key destruction and the transparency log's terminal `frozen` entry (§10.1).
 
-With multi-party (MPC) key custody in place (per §4.4), dissolution is a genuine mathematical fact, not a promise: once enough key shares are independently destroyed that the reconstruction threshold can no longer be met, the master key is information-theoretically unrecoverable, regardless of what any remaining party does.
+With multi-party (MPC) key custody in place (per §4.4, once implemented), dissolution is a genuine mathematical fact, not a promise: once enough key shares are independently destroyed that the reconstruction threshold can no longer be met, the master key is information-theoretically unrecoverable, regardless of what any remaining party does.
 
 **Effects:** existing accumulator roots for the agora are frozen; no new attestations, admissions, or content can be produced; existing content ciphertexts become permanently undecryptable once the ABE master key is destroyed; historical attestation proofs remain checkable against their frozen root for as long as any member retains a cached copy, but Skiora's ability to serve new verifications for this agora ends.
 
@@ -973,7 +976,7 @@ A person may belong to several agoras at once, holding one credential in each th
 
 ### 16.1 What isolation covers
 
-Each membership is a self-contained cryptographic domain. Keys, accumulators, roots, epoch schedules, policies, tag keys, and receipt ledgers are per agora and share nothing. Standing in one agora confers nothing in another — a member at a high tier with long tenure begins any other agora as an ordinary candidate, admitted through the same vouching flow as anyone else (§5.3). There is no cross-agora reputation, and deliberately so: a transferable standing would be a linkable one.
+Each membership is a self-contained cryptographic domain. Keys, accumulators, roots, epoch schedules, policies, tag keys — and receipt ledgers, if §10.2 is ever reintroduced from deferral — are per agora and share nothing. Standing in one agora confers nothing in another — a member at a high tier with long tenure begins any other agora as an ordinary candidate, admitted through the same vouching flow as anyone else (§5.3). There is no cross-agora reputation, and deliberately so: a transferable standing would be a linkable one.
 
 Because nullifiers are namespace-bound (§6.1) and the circuit is shared across all agoras (§6.5), two attestations by the same person in two agoras are, to any observer, unrelated artifacts of identical shape.
 
