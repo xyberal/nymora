@@ -56,3 +56,6 @@ dual licensed as above, without any additional terms or conditions.
 > migration, dissolution — but on a stub prover and a provisional signature. Nothing is
 > zero-knowledge yet, and nothing here is deployable; the real circuit (§6.5) is the next
 > milestone. [ARCHITECTURE.md](ARCHITECTURE.md) says exactly where that line sits.
+>
+> This design is **unaudited**. Do not use it to protect anyone yet. See
+> [SECURITY.md](SECURITY.md) for the full status and how to report vulnerabilities.

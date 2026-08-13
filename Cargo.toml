@@ -17,7 +17,7 @@ version = "0.0.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 rust-version = "1.81"   # core::error::Error (nymora-core is no_std)
-# repository = "..."   # set when the public repo exists
+repository = "https://github.com/xyberal/nymora"
 
 # Every crate in this workspace inherits these lints (see `[lints] workspace = true`).
 [workspace.lints.rust]

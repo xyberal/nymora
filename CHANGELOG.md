@@ -6,6 +6,12 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **A security policy, and the repository named.** `SECURITY.md` states the status
+  plainly — pre-release, unaudited, provisional primitives; do not use this to protect
+  anyone yet — and asks for private vulnerability reports, with specification-level
+  attacks named as the most valuable class and §15's documented limitations as the
+  known out-of-scope. The README's status note carries the same warning. Every crate's
+  metadata now names the repository (`github.com/xyberal/nymora`).
 - **The workspace carries its own secret scan.** CI gains a gitleaks job over the tree
   and the full history (a secret committed and later deleted still travels with every
   clone), configured by a new `.gitleaks.toml` whose allowlist is narrow and argued per
