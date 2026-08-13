@@ -77,7 +77,11 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
         ) {
             return Err(Rejection::because(LocalReason::ProofInvalid).into());
         }
+        // The admission stages before the spend does, so a staging refusal — a full
+        // class, a duplicate successor — refuses the migration whole rather than
+        // consuming the old leaf for nothing (proposal 0026).
+        let admission = self.stage_admission(class, successor)?;
         self.staged.spends.push(spend);
-        Ok(self.stage_admission(class, successor)?)
+        Ok(admission)
     }
 }

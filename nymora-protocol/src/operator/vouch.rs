@@ -164,7 +164,11 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
 
     /// Stages a leaf for the next boundary, returning where and when it lands
     /// (proposal 0020). Callers have already checked their own preconditions; this checks
-    /// capacity, the one condition they share.
+    /// the two every entry path shares: capacity, and that the class does not already
+    /// hold the leaf — landed or staged (proposal 0026). The flows converge here, so the
+    /// at-most-once-per-class invariant lives here: two vouch sessions may race for one
+    /// candidate, and the later finalize refuses like any other failed finalize rather
+    /// than landing the same leaf twice and burning terminal capacity (§5.2).
     pub(super) fn stage_admission(
         &mut self,
         class: PolicyClass,
@@ -177,6 +181,15 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
             .classes
             .get(&class)
             .ok_or(Rejection::because(LocalReason::PolicyDenied))?;
+        let duplicate = state.positions.contains_key(&leaf)
+            || self
+                .staged
+                .admissions
+                .iter()
+                .any(|(staged_class, staged_leaf)| *staged_class == class && *staged_leaf == leaf);
+        if duplicate {
+            return Err(Rejection::because(LocalReason::PolicyDenied));
+        }
         let staged_before = self
             .staged
             .admissions

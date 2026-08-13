@@ -288,6 +288,18 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   which is what `Unavailable` would imply.
 
 ### Fixed
+- **A leaf lands at most once per class** (§5.2; proposal 0026). The staged-admission
+  list had no duplicate check, so two vouch sessions racing for one candidate could both
+  finalize and land the same commitment twice — burning terminal capacity (§5.2) and
+  silently overwriting position bookkeeping, though minting no second vote (counted
+  nullifiers derive from `sk_cred` and are leaf-independent). `stage_admission` is now
+  the choke point: it refuses a leaf the class already holds, landed or staged.
+  Migration acceptance also staged the spend *before* the admission, so a verified
+  migration whose staging then refused (a full class suffices) consumed the old leaf
+  while admitting no successor — the full lost-device price for a refusal. The admission
+  now stages first; a refusal costs nothing. Both pinned by tests: the second finalize
+  refuses and exactly one seat lands; a migration into a full class broadcasts no spend
+  and the predecessor keeps acting.
 - `Witness` no longer derives `Debug`: the derived form printed the member's index — their
   position in the membership set, which the crate's own `Node` type already refuses to log
   by habit — plus every sibling on the path. The hand-written form renders only the depth,

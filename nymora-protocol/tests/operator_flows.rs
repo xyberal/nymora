@@ -943,3 +943,143 @@ fn an_exhausted_class_refuses_at_the_door() {
         ProtocolError::Rejected
     );
 }
+
+// ---- §5.2: staging integrity (proposal 0026) ----
+
+/// One candidate, two racing sessions: both gather attestations, but only the first
+/// finalize stages the leaf. The second refuses rather than landing the same commitment
+/// twice — which would burn terminal capacity (§5.2) and corrupt position bookkeeping.
+#[test]
+fn a_candidate_lands_at_most_once() {
+    let mut alice = member(0x11);
+    let mut op = founded(&mut alice, false);
+    let mut bob = member(0x12);
+    op.credentials_init(bob.leaf).unwrap();
+    let first = op.start_vouch(bob.leaf, TIER2, entropy(0x51)).unwrap();
+    let second = op.start_vouch(bob.leaf, TIER2, entropy(0x52)).unwrap();
+
+    let (proof, n) = alice.vouch(&op, first);
+    op.vouch_attest(first, &proof, n).unwrap();
+    let (proof, n) = alice.vouch(&op, second);
+    op.vouch_attest(second, &proof, n).unwrap();
+
+    let admission = op
+        .vouch_finalize(first)
+        .expect("the first finalize stages the leaf");
+    bob.position = admission.position;
+    assert_eq!(
+        op.vouch_finalize(second).unwrap_err(),
+        ProtocolError::Rejected,
+        "the second finalize staged the same leaf twice"
+    );
+
+    // The boundary lands exactly one seat: Bob's position serves, the next is empty.
+    advance(&mut op, &mut [&mut alice, &mut bob]);
+    let key = bob.witness_key.as_ref().unwrap();
+    assert!(op.witness(key, TIER2, bob.position).is_ok());
+    assert_eq!(
+        op.witness(key, TIER2, bob.position + 1).unwrap_err(),
+        ProtocolError::Rejected,
+        "a second copy of the leaf landed"
+    );
+}
+
+/// A staging refusal cannot consume the old leaf: a verified migration into a full class
+/// refuses whole — the boundary broadcasts no spend, and the predecessor keeps acting
+/// (proposal 0026). Before the fix, the spend staged first and the refusal burned it.
+#[test]
+fn a_refused_migration_does_not_burn_the_spend() {
+    const TINY: usize = 1; // capacity 2
+    let mut alice = member(0x11);
+    let mut op: AgoraState<StubProver, TINY> = found(&mut alice, 0x1b, None);
+    let mut bob = member(0x12);
+    admit(&mut op, &mut bob, &[&alice], 0x51);
+    advance(&mut op, &mut [&mut alice, &mut bob]);
+    // Both seats are landed: the class is full, so any staging refuses.
+
+    let successor_keys = SoftwareKeyStore::new([0x2b; 32]);
+    let mut successor_pk_buf = [0u8; 64];
+    let mut binding = [0u8; 64];
+    let written =
+        create_successor_root(AGORA, &successor_keys, &mut successor_pk_buf, &mut binding)
+            .expect("successor root");
+    let successor_pk = &successor_pk_buf[..written.public_key];
+
+    let mut old_pk = [0u8; 64];
+    let mut cert = [0u8; 128];
+    let mut handoff_bytes = [0u8; 512];
+    let len = authorize_migration(
+        AGORA,
+        &bob.keys,
+        &bob.store,
+        successor_pk,
+        &mut old_pk,
+        &mut cert,
+        &mut handoff_bytes,
+    )
+    .expect("authorization succeeds");
+    let handoff =
+        nymora_core::MigrationHandoff::decode(&handoff_bytes[..len]).expect("handoff decodes");
+    let mut new_store = TestStore::default();
+    let migrated = complete_migration(AGORA, &mut new_store, &handoff, successor_pk, entropy(0x2c))
+        .expect("completion succeeds");
+
+    let mut stored_opening = [0u8; 32];
+    new_store
+        .load(AGORA, Slot::RootOpening, &mut stored_opening)
+        .unwrap()
+        .expect("successor opening stored");
+    let successor_opening = RootOpening::new(stored_opening);
+    let inclusion = op
+        .witness(bob.witness_key.as_ref().unwrap(), TIER2, bob.position)
+        .unwrap();
+    let revocation_absence = bob.revocations.absence_witness(bob.leaf.as_bytes());
+    let witness = MigrationWitness {
+        old_root_public_key: handoff.root_public_key,
+        old_root_opening: &handoff.root_opening,
+        credential_key: &handoff.credential_key,
+        old_leaf_witness: &inclusion,
+        migration_cert_signature: handoff.migration_cert,
+        successor_public_key: successor_pk,
+        successor_opening: &successor_opening,
+        revocation_absence: &revocation_absence,
+    };
+    let roots = bob.roots.unwrap();
+    let (proof, spend) = prove_migration(
+        &StubProver,
+        &witness,
+        AGORA,
+        roots.class,
+        roots.revocation,
+        migrated.commitment,
+    )
+    .expect("the migration proves");
+
+    assert_eq!(
+        op.migrate(TIER2, &proof, spend, migrated.commitment)
+            .unwrap_err(),
+        ProtocolError::Rejected,
+        "a full class accepted a successor"
+    );
+
+    // The refusal consumed nothing: no spend in the boundary broadcast, and the old
+    // device still acts with its standing intact.
+    let bulletin = op.advance_epoch().unwrap();
+    assert!(
+        !bulletin.spent.contains(spend.as_bytes()),
+        "a refused migration burned the spend"
+    );
+    alice.apply_bulletin(&bulletin);
+    bob.apply_bulletin(&bulletin);
+    bob.acting(&op, |witness, epoch, roots| {
+        prove_authorship(
+            &StubProver,
+            witness,
+            AGORA,
+            epoch,
+            roots,
+            MessageHash::from_bytes([0xad; 32]),
+        )
+        .expect("an unspent predecessor still acts");
+    });
+}
