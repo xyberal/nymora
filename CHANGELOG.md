@@ -6,6 +6,22 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **The bulletin is a signed operator statement** (§9.1, §10.1, §11; proposal 0024,
+  applied). The boundary bulletin is meant to be cached, relayed, and fetched through
+  hosts a member does not trust, so it now carries its own authenticity: a canonical
+  domain-tagged digest (new `nymora/v0/bulletin` domain; agora inside the signed bytes;
+  every field framed; KAT pinned by independent computation) signed by a per-agora
+  **operator statement key**, distinct from member material and from the log-head key.
+  Members pin the key at admission and accept with the new feature-free
+  `nymora-protocol::bulletin` module — signature plus strictly-advancing epoch, so a
+  replayed pre-revocation bulletin cannot hold a verifier at stale roots — behind a new
+  `provisional-signature` feature so member builds opt in without the operator role.
+  Two validly signed divergent bulletins for one epoch are portable fork proof
+  (`bulletin_equivocation`), extending §10.1's non-equivocation to log-less agoras;
+  where a log exists the bulletin embeds the latest signed head, binding the
+  member-gated artifact to the public one. §9.1's separate signed epoch-advance
+  statement is subsumed — it was the degenerate bulletin. Dissolution now destroys the
+  statement seed with the tag secret; `Executed::Revocation` boxes its bulletin.
 - **The protocol state machines, both roles** — `nymora-protocol` now carries the whole
   server side of §4–§12 behind a new `operator` feature (`AgoraState`): single-founder
   bootstrap (§4.1), vouch sessions with nullifier distinctness and zero-field

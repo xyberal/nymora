@@ -350,6 +350,8 @@ fn the_whole_lifecycle_runs_in_two_agoras_that_share_nothing() {
         tag_keys: Vec::new(),
         roots: None,
         witness_key: None,
+        statement_key: Some(op_b.statement_key()),
+        epoch: None,
     };
     dana_b2.apply_bulletin(&bulletin_b);
     dana_b2.acting(&op_b, |witness, epoch, roots| {

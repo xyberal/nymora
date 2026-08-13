@@ -22,6 +22,8 @@
 
 #![no_std]
 
+#[cfg(feature = "provisional-signature")]
+pub mod bulletin;
 pub mod credential;
 pub mod decision;
 pub mod live_auth;
@@ -29,6 +31,8 @@ pub mod live_auth;
 pub mod operator;
 pub mod proving;
 
+#[cfg(feature = "provisional-signature")]
+pub use bulletin::{accept_bulletin, bulletin_equivocation, BulletinStatement, EmbeddedHead};
 pub use credential::{
     authorize_migration, create_successor_root, discard_expired, load_epoch_record, roll_epoch,
     store_tag_key, EpochRecord, FreshEntropy, MAX_EPOCH_GAP,

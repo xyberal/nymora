@@ -12,6 +12,7 @@ use nymora_circuits::{ChainWitness, ProofSystem, StubProver};
 use nymora_core::{
     AgoraId, Commitment, Epoch, Nullifier, PolicyClass, ProtocolError, TagKey, WitnessKey,
 };
+use nymora_crypto::signature::PUBLIC_KEY_LEN;
 use nymora_crypto::{nullifier, signature};
 use nymora_ports::{SecureStorage, Slot, SoftwareKeyStore};
 use nymora_proofs::{prove_policy_approval, prove_vouch, EpochRoots};
@@ -79,6 +80,11 @@ pub struct Member {
     pub roots: Option<EpochRoots>,
     /// The epoch's witness-service key, from the same bulletin (proposal 0025).
     pub witness_key: Option<WitnessKey>,
+    /// The operator statement key, pinned at admission (proposal 0024) — every bulletin
+    /// is verified against it before anything is applied.
+    pub statement_key: Option<[u8; PUBLIC_KEY_LEN]>,
+    /// The last accepted bulletin's epoch — the monotonicity cursor (proposal 0024).
+    pub epoch: Option<Epoch>,
 }
 
 impl Member {
@@ -114,6 +120,8 @@ impl Member {
             tag_keys: Vec::new(),
             roots: None,
             witness_key: None,
+            statement_key: None,
+            epoch: None,
         };
         member.roll(epoch);
         member
@@ -141,6 +149,16 @@ impl Member {
     /// credential. The bulletin is a member's only source for current roots and the
     /// witness key (proposal 0025).
     pub fn apply_bulletin(&mut self, bulletin: &Bulletin) {
+        // Proposal 0024: nothing is applied before the statement verifies — signature
+        // under the pinned key, over the member's own agora, strictly advancing.
+        nymora_protocol::accept_bulletin(
+            self.statement_key.as_ref().expect("statement key pinned"),
+            &bulletin.statement(self.agora),
+            &bulletin.signature,
+            self.epoch,
+        )
+        .expect("the bulletin is a valid signed statement");
+        self.epoch = Some(bulletin.epoch);
         self.revocations = ExclusionSet::new();
         for key in &bulletin.revoked {
             self.revocations.insert(*key);
@@ -281,12 +299,15 @@ pub fn found<const D: usize>(
             founder_classes: &[founder.class],
         },
         entropy(tag_seed),
+        entropy(tag_seed ^ 0x5c),
         log_seed.map(entropy),
     )
     .expect("founding succeeds");
     founder.position = 0;
-    // Genesis has no boundary, so the founder is equipped by the current bulletin —
-    // the same members-only channel every later epoch uses (proposal 0025).
+    // The founder pins the statement key as part of founding (proposal 0024), then —
+    // genesis having no boundary — is equipped by the current bulletin, the same
+    // members-only channel every later epoch uses (proposal 0025).
+    founder.statement_key = Some(op.statement_key());
     let bulletin = op.current_bulletin().expect("agora is live");
     founder.apply_bulletin(&bulletin);
     op
@@ -300,6 +321,8 @@ pub fn admit<const D: usize>(
     id_seed: u8,
 ) {
     op.credentials_init(candidate.leaf).expect("init records");
+    // The statement key travels in the host's admission package (proposal 0024).
+    candidate.statement_key = Some(op.statement_key());
     let session = op
         .start_vouch(candidate.leaf, candidate.class, entropy(id_seed))
         .expect("session opens");

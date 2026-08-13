@@ -54,6 +54,7 @@ pub use access::{Challenge, MemberAccess};
 pub use log::{conforms, equivocation, verify_log, LogEntry, SignedHead, TransparencyLog};
 pub use quorum::{Executed, ProposalView};
 
+use crate::bulletin::{BulletinStatement, EmbeddedHead};
 use crate::credential::FreshEntropy;
 use crate::decision::SubjectId;
 use alloc::collections::{BTreeMap, BTreeSet};
@@ -64,6 +65,7 @@ use nymora_core::{
     AgoraId, Commitment, Epoch, LocalReason, Nullifier, PolicyClass, ProtocolError, Rejection,
     Root, SecretBytes, TagKey, WitnessKey,
 };
+use nymora_crypto::signature::{self, PUBLIC_KEY_LEN, SIGNATURE_LEN};
 use nymora_crypto::{derive_tag_key, derive_witness_key};
 use nymora_proofs::EpochRoots;
 
@@ -122,25 +124,61 @@ pub struct ClassPolicy {
 /// would start life unable to compute the absence witnesses their first proof needs.
 /// Delivery to *remaining members only* is the host's obligation — this value in a
 /// revoked member's hands is §11 broken.
+///
+/// The bulletin is a **signed operator statement** (proposal 0024): [`Self::signature`]
+/// covers the canonical digest of everything above it, cut by the per-agora statement
+/// key ([`AgoraState::statement_key`]). Members accept it with
+/// [`accept_bulletin`](crate::bulletin::accept_bulletin) — signature under the key
+/// pinned at admission, plus a strictly advancing epoch — so the artifact stays
+/// trustworthy cached, relayed, and fetched through hosts the member does not trust.
 #[derive(Debug)]
 pub struct Bulletin {
     /// The epoch now current.
     pub epoch: Epoch,
-    /// Each class's root for the new epoch.
+    /// Each class's root for the new epoch, in ascending class order.
     pub class_roots: Vec<(PolicyClass, Root)>,
     /// The revocation-set root for the new epoch (§11).
     pub revocation_root: Root,
     /// The migration-spend root for the new epoch (§9.3).
     pub spend_root: Root,
-    /// The whole revocation set as of this boundary (§11).
+    /// The whole revocation set as of this boundary, ascending (§11).
     pub revoked: Vec<[u8; 32]>,
-    /// The whole migration-spend set as of this boundary (§9.3).
+    /// The whole migration-spend set as of this boundary, ascending (§9.3).
     pub spent: Vec<[u8; 32]>,
     /// The new epoch's routing tag key (§6.4, §11).
     pub tag_key: TagKey,
     /// The new epoch's witness-service key (§5.2, proposal 0025) — what a member presents
     /// to refresh an inclusion witness, since that service cannot be proof-gated.
     pub witness_key: WitnessKey,
+    /// The latest signed transparency-log head, where this agora keeps a log (§10.1;
+    /// proposal 0024) — binding the member-gated artifact to the public one.
+    pub head: Option<EmbeddedHead>,
+    /// The statement key's signature over the canonical bulletin digest
+    /// ([`BulletinStatement::digest`]).
+    pub signature: [u8; SIGNATURE_LEN],
+}
+
+impl Bulletin {
+    /// This bulletin's signed statement, bound to `agora`.
+    ///
+    /// The agora is the *viewer's*: the operator binds its own when signing, and a member
+    /// binds theirs when verifying, so a bulletin from any other agora fails
+    /// structurally (§16.1).
+    #[must_use]
+    pub fn statement(&self, agora: AgoraId) -> BulletinStatement<'_> {
+        BulletinStatement {
+            agora,
+            epoch: self.epoch,
+            class_roots: &self.class_roots,
+            revocation_root: self.revocation_root,
+            spend_root: self.spend_root,
+            revoked: &self.revoked,
+            spent: &self.spent,
+            tag_key: &self.tag_key,
+            witness_key: &self.witness_key,
+            head: self.head.as_ref(),
+        }
+    }
 }
 
 /// One class's accumulator and bookkeeping.
@@ -223,6 +261,7 @@ pub struct AgoraState<S: ProofSystem<DEPTH>, const DEPTH: usize> {
     challenges: BTreeSet<[u8; 32]>,
     history: BTreeMap<u64, Snapshot>,
     tag_secret: SecretBytes<32>,
+    statement_seed: SecretBytes<32>,
     log: Option<TransparencyLog>,
     dissolved: bool,
 }
@@ -237,9 +276,12 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
     /// quorum starts at 1 for the same unavoidable reason (§4.2), and the group's first
     /// acts should be the policy proposals that raise it (§4.3).
     ///
-    /// `tag_secret` seeds the per-epoch tag keys (§6.4); `log_seed`, when present, opts
-    /// this agora into the transparency log and keys its tree heads (§10.1 — opt-in
-    /// because publishing roots reveals the agora exists).
+    /// `tag_secret` seeds the per-epoch tag keys (§6.4); `statement_entropy` seeds the
+    /// operator **statement key** that signs every bulletin (§11, proposal 0024) —
+    /// distinct from member material and from the log key, and required for every agora,
+    /// log or no log; `log_seed`, when present, opts this agora into the transparency
+    /// log and keys its tree heads (§10.1 — opt-in because publishing roots reveals the
+    /// agora exists).
     ///
     /// # Errors
     ///
@@ -251,6 +293,7 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
         system: S,
         founding: &Founding<'_>,
         tag_secret: FreshEntropy,
+        statement_entropy: FreshEntropy,
         log_seed: Option<FreshEntropy>,
     ) -> Result<Self, ProtocolError> {
         if founding.classes.is_empty() {
@@ -271,6 +314,7 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
             challenges: BTreeSet::new(),
             history: BTreeMap::new(),
             tag_secret: SecretBytes::new(tag_secret.take()),
+            statement_seed: SecretBytes::new(statement_entropy.take()),
             log: log_seed.map(|seed| TransparencyLog::new(seed.take())),
             dissolved: false,
         };
@@ -315,6 +359,17 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
     #[must_use]
     pub fn current_epoch(&self) -> Epoch {
         self.epoch
+    }
+
+    /// The operator statement key's public half (§11, proposal 0024) — what members pin
+    /// at admission and verify every bulletin against.
+    ///
+    /// How it reaches a member is the host's admission package, alongside the `agora_id`
+    /// itself (§3): both are facts a member must hold before their first bulletin, and
+    /// neither can be bootstrapped from the channel the bulletin arrives on.
+    #[must_use]
+    pub fn statement_key(&self) -> [u8; PUBLIC_KEY_LEN] {
+        signature::public_key(self.statement_seed.expose())
     }
 
     /// The inclusion witness for a landed leaf, by its permanent position, under the
@@ -497,22 +552,56 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
         derive_witness_key(self.tag_secret.expose(), &self.agora, self.epoch)
     }
 
-    /// The current epoch's members-only broadcast payload (§11).
+    /// The current epoch's members-only broadcast payload, signed (§11, proposal 0024).
+    ///
+    /// The embedded head is the log's latest — appended by [`Self::snapshot`] *before*
+    /// any bulletin for the epoch exists, so the head always covers the roots the
+    /// bulletin carries.
     fn bulletin_now(&self) -> Bulletin {
         let snapshot = &self.history[&self.epoch.get()];
-        Bulletin {
+        let class_roots: Vec<(PolicyClass, Root)> = snapshot
+            .class_roots
+            .iter()
+            .map(|(class, root)| (*class, *root))
+            .collect();
+        let revoked: Vec<[u8; 32]> = self.revocations.keys().copied().collect();
+        let spent: Vec<[u8; 32]> = self.spends.keys().copied().collect();
+        let tag_key = self.tag_key_now();
+        let witness_key = self.witness_key_now();
+        let head = self
+            .log
+            .as_ref()
+            .and_then(|log| log.heads().last())
+            .map(|head| EmbeddedHead {
+                sequence: head.sequence,
+                head: head.head,
+                signature: head.signature,
+            });
+        let digest = BulletinStatement {
+            agora: self.agora,
             epoch: self.epoch,
-            class_roots: snapshot
-                .class_roots
-                .iter()
-                .map(|(class, root)| (*class, *root))
-                .collect(),
+            class_roots: &class_roots,
             revocation_root: snapshot.revocation,
             spend_root: snapshot.spend,
-            revoked: self.revocations.keys().copied().collect(),
-            spent: self.spends.keys().copied().collect(),
-            tag_key: self.tag_key_now(),
-            witness_key: self.witness_key_now(),
+            revoked: &revoked,
+            spent: &spent,
+            tag_key: &tag_key,
+            witness_key: &witness_key,
+            head: head.as_ref(),
+        }
+        .digest();
+        let signature = signature::sign(self.statement_seed.expose(), |absorb| absorb(&digest));
+        Bulletin {
+            epoch: self.epoch,
+            class_roots,
+            revocation_root: snapshot.revocation,
+            spend_root: snapshot.spend,
+            revoked,
+            spent,
+            tag_key,
+            witness_key,
+            head,
+            signature,
         }
     }
 
@@ -543,8 +632,10 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
         self.challenges.clear();
         self.staged = Staged::default();
         self.pending.clear();
-        // Dropping the old value zeroizes it; what remains derives nothing.
+        // Dropping the old values zeroizes them; what remains derives nothing and signs
+        // nothing — no bulletin follows a freeze (proposal 0024).
         self.tag_secret = SecretBytes::new([0u8; 32]);
+        self.statement_seed = SecretBytes::new([0u8; 32]);
         if let Some(log) = &mut self.log {
             log.append(LogEntry::Frozen { epoch: self.epoch });
         }

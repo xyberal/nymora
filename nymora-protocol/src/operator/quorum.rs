@@ -218,7 +218,9 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
             Decision::Revocation { leaf } => {
                 self.staged.revocations.push(leaf);
                 let bulletin = self.advance_epoch()?;
-                Ok(Executed::Revocation { bulletin })
+                Ok(Executed::Revocation {
+                    bulletin: alloc::boxed::Box::new(bulletin),
+                })
             }
             Decision::Dissolution => {
                 self.dissolve();
@@ -240,8 +242,9 @@ pub enum Executed {
     /// A revocation landed, advancing the epoch immediately (§11).
     Revocation {
         /// The boundary bulletin — deliver to **remaining** members only; withholding it
-        /// from the revoked member is the read-capability cut of §11.
-        bulletin: super::Bulletin,
+        /// from the revoked member is the read-capability cut of §11. Boxed for size
+        /// only: the bulletin dwarfs the other variants.
+        bulletin: alloc::boxed::Box<super::Bulletin>,
     },
     /// The agora is frozen (§12).
     Dissolved,

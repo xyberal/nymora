@@ -1,7 +1,8 @@
 # Proposal 0024 — The bulletin is a signed operator statement
 
-**Status:** Proposed — to be applied together with its implementation (spec, code, and
-vectors in one change, per the sync rule)
+**Status:** **Applied** — the sections below are now normative in the specification. The
+open questions were decided at application: the statement key is **separate** from the
+log-head key, and the bulletin **embeds** the latest signed log head where a log exists.
 **Affects:** §9.1, §11 (the boundary-broadcast paragraph), §6.4, §10.1 (cross-reference)
 **Supersedes:** nothing; subsumes §9.1's signed epoch-advance statement
 

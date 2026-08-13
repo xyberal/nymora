@@ -139,6 +139,14 @@ domains! {
     /// for something else.
     TagRouting => "nymora/v0/tag/routing",
 
+    /// The canonical digest of a boundary bulletin, signed by the operator statement
+    /// key (§11, proposal 0024).
+    ///
+    /// The digest leads with this tag and absorbs the `agora_id`, so a bulletin cannot
+    /// be replayed into another agora (§16.1) and the statement key never signs bytes
+    /// another artifact could share.
+    Bulletin => "nymora/v0/bulletin",
+
     /// Derivation of an agora's per-epoch witness-service key (§5.2, proposal 0025).
     ///
     /// Distinct from [`Domain::TagKey`] although both derive from the same operator

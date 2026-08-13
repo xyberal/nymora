@@ -34,7 +34,8 @@ use nymora_protocol::operator::{
     conforms, equivocation, verify_log, AgoraState, ClassPolicy, Executed, Founding, LogEntry,
 };
 use nymora_protocol::{
-    authorize_migration, complete_migration, create_successor_root, load_acting_material, Decision,
+    accept_bulletin, authorize_migration, bulletin_equivocation, complete_migration,
+    create_successor_root, load_acting_material, Decision,
 };
 use std::vec::Vec;
 
@@ -89,6 +90,118 @@ fn the_witness_service_is_keyed_to_the_epoch() {
     assert!(op
         .witness(alice.witness_key.as_ref().unwrap(), TIER2, 0)
         .is_ok());
+}
+
+// ---- §11: the bulletin is a signed operator statement (proposal 0024) ----
+
+/// The bulletin carries its own authenticity: the operator's signature admits it, a
+/// tampered field refuses, a replayed boundary refuses on monotonicity, another agora's
+/// binding refuses structurally, the embedded head is the log's own latest — and two
+/// validly signed divergent bulletins for one epoch are portable fork evidence.
+#[test]
+fn the_bulletin_is_a_signed_operator_statement() {
+    let mut alice = member(0x11);
+    let mut op = founded(&mut alice, true);
+    let key = op.statement_key();
+
+    // The embedded head is exactly the log's latest signed head (§10.1 binding).
+    let bulletin = op.current_bulletin().unwrap();
+    let embedded = bulletin
+        .head
+        .as_ref()
+        .expect("a logged agora embeds a head");
+    let latest = op.transparency_log().unwrap().heads().last().unwrap();
+    assert_eq!(embedded.sequence, latest.sequence);
+    assert_eq!(embedded.head, latest.head);
+    assert_eq!(embedded.signature, latest.signature);
+
+    // The genuine article verifies; a tampered field does not.
+    assert!(accept_bulletin(&key, &bulletin.statement(AGORA), &bulletin.signature, None).is_ok());
+    let mut tampered = op.current_bulletin().unwrap();
+    tampered.revocation_root = nymora_core::Root::from_bytes([0x66; 32]);
+    assert_eq!(
+        accept_bulletin(&key, &tampered.statement(AGORA), &tampered.signature, None).unwrap_err(),
+        ProtocolError::Malformed,
+        "a swapped root verified"
+    );
+
+    // Another agora's binding refuses structurally — the agora is inside the digest.
+    let elsewhere = AgoraId::from_bytes([0x0b; 32]);
+    assert!(
+        accept_bulletin(
+            &key,
+            &bulletin.statement(elsewhere),
+            &bulletin.signature,
+            None
+        )
+        .is_err(),
+        "a bulletin verified into a foreign agora"
+    );
+
+    // A key the member never pinned refuses.
+    let wrong = nymora_crypto::signature::public_key(&[0x77; 32]);
+    assert!(accept_bulletin(
+        &wrong,
+        &bulletin.statement(AGORA),
+        &bulletin.signature,
+        None
+    )
+    .is_err());
+
+    // Replay: after the boundary, the old bulletin's valid signature does not move the
+    // member back — monotonicity refuses it (§11's forced boundary survives transit).
+    advance(&mut op, &mut [&mut alice]);
+    assert_eq!(
+        accept_bulletin(
+            &key,
+            &bulletin.statement(AGORA),
+            &bulletin.signature,
+            alice.epoch
+        )
+        .unwrap_err(),
+        ProtocolError::Malformed,
+        "a replayed pre-boundary bulletin was accepted"
+    );
+
+    // Equivocation: one statement key signing two divergent bulletins for one epoch is
+    // portable proof of a fork. Two operators sharing a statement seed and agora but
+    // differing in content stand in for the forking operator.
+    let mallory = member(0x21);
+    let founding = Founding {
+        agora: AGORA,
+        genesis: GENESIS,
+        founder: mallory.leaf,
+        classes: &[(
+            TIER2,
+            ClassPolicy {
+                voucher_class: TIER2,
+                admission_threshold: 1,
+            },
+        )],
+        founder_classes: &[TIER2],
+    };
+    let fork_a: Op =
+        AgoraState::create(StubProver, &founding, entropy(0x31), entropy(0x99), None).unwrap();
+    let fork_b: Op =
+        AgoraState::create(StubProver, &founding, entropy(0x32), entropy(0x99), None).unwrap();
+    let a = fork_a.current_bulletin().unwrap();
+    let b = fork_b.current_bulletin().unwrap();
+    assert_eq!(fork_a.statement_key(), fork_b.statement_key());
+    assert!(bulletin_equivocation(
+        &fork_a.statement_key(),
+        &a.statement(AGORA),
+        &a.signature,
+        &b.statement(AGORA),
+        &b.signature,
+    ));
+    // The same bulletin twice accuses no one.
+    assert!(!bulletin_equivocation(
+        &fork_a.statement_key(),
+        &a.statement(AGORA),
+        &a.signature,
+        &a.statement(AGORA),
+        &a.signature,
+    ));
 }
 
 // ---- §4: the bootstrap arc ----
@@ -728,6 +841,8 @@ fn migration_is_accepted_spent_at_the_boundary_and_unrepeatable() {
         tag_keys: Vec::new(),
         roots: None,
         witness_key: None,
+        statement_key: Some(op.statement_key()),
+        epoch: None,
     };
     successor.apply_bulletin(&bulletin);
     successor.acting(&op, |witness, epoch, roots| {
@@ -1005,6 +1120,7 @@ fn a_zero_threshold_founding_is_malformed() {
             founder_classes: &[TIER2],
         },
         entropy(0x1b),
+        entropy(0x1d),
         None,
     );
     assert_eq!(result.err(), Some(ProtocolError::Malformed));
@@ -1021,6 +1137,7 @@ fn a_candidate_lands_at_most_once() {
     let mut op = founded(&mut alice, false);
     let mut bob = member(0x12);
     op.credentials_init(bob.leaf).unwrap();
+    bob.statement_key = Some(op.statement_key());
     let first = op.start_vouch(bob.leaf, TIER2, entropy(0x51)).unwrap();
     let second = op.start_vouch(bob.leaf, TIER2, entropy(0x52)).unwrap();
 
