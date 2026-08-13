@@ -6,6 +6,10 @@
 //! They are also deliberately **not** `Clone`: a secret should be moved or borrowed, and
 //! duplicating one should require enough friction to notice. Relax that only when a real
 //! need appears.
+//!
+//! Erasure covers the bytes each newtype owns. Copies a caller made on the way in — the
+//! stack array passed to `new`, a decoded wire buffer — are the caller's to wipe, which
+//! the handoff format states as an explicit host obligation.
 
 use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;

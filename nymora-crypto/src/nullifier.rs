@@ -71,10 +71,11 @@ pub fn vouch(key: &CredentialKey, session_id: &[u8], agora: &AgoraId) -> Nullifi
 
 /// Binds an authorship attestation to one message within one agora (§6.1).
 ///
-/// Corroboration (§6.3) is deferred, and would have shared this derivation: a member who
-/// authored a message would produce the identical nullifier when corroborating it, making
-/// self-corroboration impossible as a consequence of the shared context rather than by a
-/// separate check. If corroboration returns, that property returns with it — along with the
+/// Corroboration (§6.3) is deferred, and would have shared this derivation: a member
+/// corroborating a message they authored in the same epoch would reproduce the authorship
+/// nullifier, making same-epoch self-corroboration visible without a separate check — and
+/// only same-epoch, since the key dies with its epoch (§9.1). If corroboration returns,
+/// that property and its limit return with it — along with the
 /// key-lifetime question the module documentation describes, since a message accepts
 /// corroborations indefinitely.
 #[must_use]

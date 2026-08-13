@@ -23,6 +23,9 @@
 //! transport rules absolute: §9.3 requires the transfer be local and deliberate (the same
 //! class of channel as §8.3's commitment exchange), it must never transit Skiora or any
 //! network service, and the host must destroy its copy of the encoded buffer once decoded.
+//! Decoding itself leaves residue the secret newtypes cannot reach — the secrets pass
+//! through plain stack copies on their way into zeroizing storage — so the destruction
+//! obligation covers the whole decode path, not only the buffer the host was handed.
 //! An adversary holding these bytes holds the §15 durable-key position *plus* a signed
 //! authorization for one successor.
 //!

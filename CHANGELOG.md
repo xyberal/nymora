@@ -175,6 +175,24 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and fetching is I/O, which is the host's.
 
 ### Changed
+- **Pre-publication re-read, editorial pass**: the workspace `README` now states the
+  actual status — complete protocol logic on a stub prover and provisional primitives,
+  nothing deployable — and its crate table describes what the crates contain rather than
+  what the roadmap promises (no BBS+, no Poseidon, no real circuit yet); `tests/README`
+  points to where the conformance vectors actually live instead of calling itself a
+  scaffold placeholder. Spec illustrations caught up with normative text: §5.2's
+  `root-at-epoch` snippet now matches §7's shape, §9.3's wire block carries the
+  `agora_id` the leaf commitment has always included (§9.1, proposal 0013), §11 states
+  that the exclusion sets travel in the boundary broadcast with no separate lookup
+  (proposal 0025's rule, stated for the sets), §10.1's auditor conformance check claims
+  only what is decidable from the log artifact, and §14's dissolution bullet carries
+  §4.4's not-yet-implemented caveat. Doc comments corrected in place: the self-
+  corroboration guarantee is qualified to same-epoch (the key dies with its epoch),
+  `Domain::TagRouting` is marked reserved-and-deliberately-unused, the migration
+  statement's shape argument cites proposal 0001 rather than a §6.5 rule the spec does
+  not contain, the quorum content encoding is described as it is (per-field framing),
+  and the secret types and handoff format state plainly that decode-path stack residue
+  is the host's to wipe. No mechanism changed.
 - **Current roots and inclusion witnesses are member-only** (§5.2, §11, §15; proposal
   0025). The phase-5 `current_roots` and `witness` endpoints were ungated, and the
   pre-publication read-through showed each negated a stated guarantee: a served current

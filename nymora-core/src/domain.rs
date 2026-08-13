@@ -101,10 +101,12 @@ domains! {
     /// Nullifier binding an attestation to one message within one agora (§6.1).
     ///
     /// Authorship (§6.1) and corroboration (§6.3) share this domain deliberately: both
-    /// derive `Hash(sk, message_hash, agora_id)`, so a member who authored a message
-    /// produces the same nullifier when corroborating it, and the duplicate is rejected.
-    /// Self-corroboration is prevented as a consequence of the shared domain rather than
-    /// by a separate check.
+    /// derive `Hash(sk, message_hash, agora_id)`, so a member corroborating a message
+    /// they authored in the same epoch reproduces their authorship nullifier, and the
+    /// duplicate is rejected without a separate check. The guarantee is same-epoch only —
+    /// the key is destroyed when its epoch ends (§9.1), so a later self-corroboration
+    /// would derive fresh — which is one strand of why corroboration is deferred rather
+    /// than shipped (§6.3, proposal 0005).
     NullifierAttestation => "nymora/v0/nullifier/attestation",
 
     /// Nullifier enforcing one approval per credential on a policy proposal (§4.3).
@@ -128,7 +130,13 @@ domains! {
     /// Derivation of an agora's per-epoch tag key (§6.4).
     TagKey => "nymora/v0/tag/key",
 
-    /// The routing tag attached to published content (§6.4).
+    /// Reserved: the routing tag attached to published content (§6.4).
+    ///
+    /// Deliberately unused. §6.4's tag is bare `HMAC(K_tag_e, message_hash)` — the
+    /// specification's literal construction — and the tag module argues that if `K_tag_e`
+    /// ever acquires a second purpose, the separation belongs in the *key's* derivation,
+    /// not in a prefix on this message. Registered so the name cannot quietly be claimed
+    /// for something else.
     TagRouting => "nymora/v0/tag/routing",
 
     /// Derivation of an agora's per-epoch witness-service key (§5.2, proposal 0025).

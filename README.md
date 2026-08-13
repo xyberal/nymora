@@ -21,12 +21,12 @@ supply those through the trait interfaces in [`nymora-ports`](nymora-ports).
 
 | Crate | Responsibility |
 |---|---|
-| `nymora-core` | Shared types, wire formats, `agora_id` derivation, errors |
-| `nymora-crypto` | BBS+ credentials, Poseidon, commitments, nullifiers, tags, KDF |
-| `nymora-circuits` | The one standardized ZK circuit; verifier keys |
-| `nymora-accumulator` | Fixed-depth Merkle accumulator |
-| `nymora-proofs` | Attestation / vouch / policy-check / live-auth proofs |
-| `nymora-protocol` | State machines + conformance vectors, both roles |
+| `nymora-core` | Shared types, wire formats, the domain registry, secret newtypes, errors |
+| `nymora-crypto` | Hashing (byte + provisional algebraic), commitments, nullifiers, tags, KDF, `agora_id` and live-auth derivations, the provisional signature |
+| `nymora-circuits` | The two proof statements, the `ProofSystem` boundary, and — until the real circuit — the stub prover |
+| `nymora-accumulator` | Positional Merkle accumulator and the keyed exclusion sets |
+| `nymora-proofs` | The per-action prove/verify surface |
+| `nymora-protocol` | Credential lifecycle and state machines, both roles |
 | `nymora-ports` | `KeyStore` and `SecureStorage` traits (the engine is sans-io) |
 
 ## Build
@@ -50,5 +50,8 @@ at your option. Unless you explicitly state otherwise, any contribution intentio
 submitted for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
 dual licensed as above, without any additional terms or conditions.
 
-> Status: **scaffold**. Crates are placeholders established in Step 1; protocol logic
-> lands in subsequent steps.
+> Status: **complete protocol logic on provisional primitives.** Both roles' state
+> machines run the whole lifecycle end-to-end — bootstrap, vouching, content, revocation,
+> migration, dissolution — but on a stub prover and a provisional signature. Nothing is
+> zero-knowledge yet, and nothing here is deployable; the real circuit (§6.5) is the next
+> milestone. [ARCHITECTURE.md](ARCHITECTURE.md) says exactly where that line sits.

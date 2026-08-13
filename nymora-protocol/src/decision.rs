@@ -69,7 +69,8 @@ impl Decision {
         }
     }
 
-    /// Canonical content bytes, absorbed as one framed field.
+    /// Canonical content bytes — each field absorbed length-framed, in a fixed order per
+    /// kind.
     ///
     /// Fixed layout per kind; the kind itself is carried by the domain tag, not by a
     /// discriminant byte, so the encodings need not be disjoint across kinds.

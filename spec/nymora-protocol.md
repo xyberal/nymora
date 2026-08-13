@@ -222,7 +222,9 @@ Each policy class (e.g., "Tier2 members," "Tier2-eligible vouchers") has its own
 ```
 Current-epoch roots: delivered in the boundary broadcast (§11) — nothing to query.
 
-GET /agora/{agora_id}/accumulator/{policy_class}/root-at-epoch   [member-gated — see §7]
+POST /agora/{agora_id}/accumulator/{policy_class}/root-at-epoch   [member-gated — see §7]
+  auth: access
+  body: { epoch }
   → { root_at_epoch }
 ```
 
@@ -739,7 +741,7 @@ New device: generates a fresh (sk_root_new, r_root_new, pk_root_new) internally,
             carries sk_cred over from the old credential — it is not regenerated
 
 POST /agora/{agora_id}/credentials/migrate
-  body: { migration_cert, new_commitment: Commit(pk_root_new, sk_cred, r_root_new) }
+  body: { migration_cert, new_commitment: Commit(pk_root_new, sk_cred, r_root_new, agora_id) }
 ```
 
 The migration certificate's signed message is canonical for the same reason the epoch certificate's is (§9.1): the domain tag `nymora/v0/migration-cert`, the `agora_id`, and `pk_root_new`, in that order, each field length-framed as in §6.6. It is verified inside a proof, so the bytes must agree between every implementation and the circuit.
@@ -806,7 +808,7 @@ The rule behind that list: **a value derived from a durable secret may be reveal
 **What an independent auditor can verify** (holding only the public log):
 1. **Non-equivocation** — Skiora serves one linear history, not a secretly forked view showing different roots to different members (a split-view attack).
 2. **Append-only integrity** — no root was retroactively altered or deleted; a rogue actor cannot quietly roll back a revocation or un-dissolve an agora.
-3. **Protocol conformance** — each state transition follows the rules (e.g., dissolution actually froze the roots; a claimed revocation actually appears in the revocation-set root).
+3. **Protocol conformance** — each state transition follows the rules that are decidable from the log alone: epochs never rewind, and nothing follows a terminal `frozen` entry. What the log cannot show is not claimed: roots are opaque hashes, so whether a claimed revocation appears *inside* the revocation-set root is checkable only by a member holding the set (§11), never by an outside auditor — deliberately, since a log that could answer it would carry per-member state.
 
 The auditor learns *that the machinery is honest*, and nothing about membership, content, or identity.
 
@@ -912,7 +914,7 @@ Revocation therefore advances the epoch immediately rather than waiting for the 
 
 The boundary broadcast carries more than the tag key: it is the members' distribution channel for everything the new epoch fixed — the epoch's canonical roots (proposal 0020), both exclusion sets whole, `K_tag`, and the witness-service key `K_witness` (§5.2, proposal 0025) — so that every remaining member can refresh witnesses and act without a bootstrap dependency on the member-gated services of §7, which a member could not satisfy at a boundary where anything changed without the very material being distributed. It is also a member's only source for the current epoch's roots — there is no lookup to gate or to leak (§5.2). The sets travel whole rather than as deltas: a delta presumes an earlier copy, and a member admitted at that very boundary has none — they would start life unable to compute the absence witnesses their first proof requires. The delivery cut is the security property: what reaches remaining members and not the revoked one is exactly this broadcast. The broadcast is not yet authenticated as an object: proposal 0024 (proposed, not yet applied) makes it a signed operator statement, and records why channel security alone is not enough for an artifact meant to be cached and relayed.
 
-The revocation set and the migration-spend set (§9.3) are served to members whole, member-gated like roots (§7), and non-membership witnesses are computed locally by each Persora. A witness request naming a specific leaf would disclose to Skiora exactly which credential is about to act; serving the full set is what keeps the request anonymous, and is affordable because both sets grow with revocations and migrations, never with membership or content.
+The revocation set and the migration-spend set (§9.3) reach members whole in this same broadcast — there is no separate lookup for them, exactly as for the roots (§5.2) — and non-membership witnesses are computed locally by each Persora. A witness request naming a specific leaf would disclose to Skiora exactly which credential is about to act; delivering the full set is what keeps that computation local and anonymous, and is affordable because both sets grow with revocations and migrations, never with membership or content.
 
 An early advance also expires any open policy proposal or vouch session (§4.3, §5.3). That is intended rather than incidental — the membership set has changed, so the quorum arithmetic has changed, and approvals cast in part by a now-revoked credential should not carry forward silently.
 
@@ -967,7 +969,7 @@ Whoever operates a given agora's Skiora — self-hosted by the group, or a chose
 
 - **Membership**: Anonymous, threshold-vouched admission into tiered agoras, with zero-knowledge proofs verifying eligibility and credentials without revealing which specific member acted, bootstrapped from a single founder with no special-cased founding infrastructure.
 - **Content**: Authored content carries unlinkable, message-bound attestations proving "a real group member stands behind this" externally, while richer authorship and reliability tracking remains a member-only concept — and standing is enforced at the moment of every action (§9.1, §11) rather than being queryable per past attestation.
-- **Governance**: Agoras mutate admission policy and thresholds at will via quorum, and can be permanently and verifiably dissolved through irreversible multi-party key destruction.
+- **Governance**: Agoras mutate admission policy and thresholds at will via quorum, and can be permanently dissolved — verifiably, through irreversible multi-party key destruction, once MPC custody lands (§4.4, not yet implemented); procedurally, with best-effort destruction and the log's terminal entry, until then (§12).
 - **Live authentication**: Two or more members actively communicating — over a network channel or in person — can mutually confirm, in real time, that everyone present holds a genuine, currently-valid credential and actually possesses its secret key, using a jointly-derived, replay-resistant session context and, for in-person settings, a human-verified short authentication string in place of network-channel binding.
 - **Key custody and continuity**: A root/epoch key hierarchy bounds the damage of routine compromise to a single epoch, hardware-backed authenticators protect the rarely-used root key against silent extraction, and dual migration/re-vouching paths let a member change devices with or without preserving reputation continuity, depending on whether their prior device remains reachable.
 - **Integrity and auditability**: An optional per-agora append-only transparency log lets any independent outside party verify the machinery is run honestly — non-equivocation, append-only integrity, and protocol conformance — without any membership or identity access. Detection of a rogue *client's* misbehaviour is deferred with §10.2 (proposal 0010).
