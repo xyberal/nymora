@@ -24,9 +24,9 @@ use subtle::{Choice, ConditionallySelectable, ConstantTimeEq};
 
 /// Derives an agora's tag key for one epoch.
 ///
-/// Performed by the agora, whose members receive the result through attribute-based
-/// encryption rather than deriving it themselves — `agora_secret` is not member material.
-/// A member's Persora holds the broadcast keys and never runs this.
+/// Performed by the agora, whose members receive the result through the boundary
+/// broadcast (§11) rather than deriving it themselves — `agora_secret` is not member
+/// material. A member's Persora holds the broadcast keys and never runs this.
 #[must_use]
 pub fn derive_tag_key(agora_secret: &[u8], agora: &AgoraId, epoch: Epoch) -> TagKey {
     let mut context = [0u8; DIGEST_LEN + 8];

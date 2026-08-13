@@ -105,8 +105,8 @@ pub struct CredentialKey(SecretBytes<32>);
 /// An agora's per-epoch routing tag key, `K_tag_e` (§6.4).
 ///
 /// Symmetric, shared by every current member of one agora for one epoch, and distributed
-/// through the same attribute-based-encryption gating used for tiered content. Revocation
-/// is implicit: a revoked member simply stops receiving future broadcasts.
+/// in the boundary broadcast (§11; proposal 0029). Revocation is implicit: a revoked
+/// member simply stops receiving future broadcasts.
 ///
 /// Because it is shared, it authenticates nothing about *who* produced a tag — it only
 /// establishes that the producer held the epoch's key. Never treat a tag match as evidence

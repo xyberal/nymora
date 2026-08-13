@@ -363,7 +363,7 @@ Content bundles must let a member determine which agora and epoch to verify agai
 tag = HMAC(K_tag_e, message_hash)
 ```
 
-`K_tag_e` is a symmetric key specific to one agora and one epoch, distributed only to current members via the agora's attribute-based-encryption (ABE) content-gating mechanism — the same mechanism used to gate tiered content generally. A member resolves a tag by trying their own held `K_tag_e` values (bounded to recent epochs they hold keys for):
+`K_tag_e` is a symmetric key specific to one agora and one epoch, distributed only to current members in the boundary broadcast (§11) — the members-only channel carrying everything an epoch fixes. (Tier-gated content encryption, the attribute-based mechanism earlier drafts assumed would also deliver this key, is deferred to a later protocol version — proposal 0029; nothing about the tag construction depends on it.) A member resolves a tag by trying their own held `K_tag_e` values (bounded to recent epochs they hold keys for):
 
 ```
 for e in recent_epochs_member_has_keys_for:
@@ -372,7 +372,7 @@ for e in recent_epochs_member_has_keys_for:
 
 `tag` is a fixed-size (e.g., 32-byte) HMAC output — computationally indistinguishable from random to anyone without the key. It carries no visible structure, length variation, or label.
 
-Revocation of tag access follows automatically from the existing ABE-gating mechanism: a revoked member simply stops receiving future `K_tag_e` broadcasts.
+Revocation of tag access follows automatically from the delivery cut (§11): a revoked member simply stops receiving future boundary broadcasts, and with them `K_tag_e`.
 
 Because tag keys are broadcast per epoch, ceasing to broadcast takes effect at the next epoch boundary rather than immediately. An agora may advance the epoch early precisely to make it immediate; see §11.
 
@@ -441,7 +441,7 @@ POST /agora/{agora_id}/verify
 
 The membership proof in either form is the full chain of §9.1 — that statement is normative there, and only its final clause varies by action. For verification access the final clause binds a **Skiora-issued, single-use challenge** into the Fiat–Shamir transcript, exactly as an authorship proof binds `message_hash` (§6.5), and carries **no nullifier**: access is not a count, so there is nothing for a nullifier to enforce, and a credential-derived artifact per lookup would disclose more than the accepted baseline — that some current member of the class asked — for no property in return. Replay is closed by the challenge being single-use, not by distinctness bookkeeping (proposal 0019).
 
-Because a member must prove standing before receiving a root, verification is an online operation requiring live contact with Skiora — consistent with Skiora already being relied upon for root distribution, tag-key distribution, and content gating.
+Because a member must prove standing before receiving a root, verification is an online operation requiring live contact with Skiora — consistent with Skiora already being relied upon for root distribution, tag-key distribution, and content delivery.
 
 ---
 
@@ -904,7 +904,7 @@ What a member can establish about older content is epoch-coarse and computed loc
 
 **External scoping is unchanged:** the group's attestation remains permanent and unconditional — "the group vouched for this at the time" — regardless of internal governance since. This mirrors the group-vs-individual reputation scoping in §6.2: the external world receives a coarse, permanent, group-level fact; internally, the finest claim available is the epoch-coarse one above.
 
-**Revocation is asymmetric in effect, and both sides are closed deliberately.** Write capability ends because every routine proof must show the credential's leaf absent from the revocation set at the current epoch (§9.1); the leaf itself never leaves the accumulator (§5.2), and does not need to. Read capability ends through the tag-key broadcast: a revoked member already holds the current epoch's `K_tag_e` and the content keys gated alongside it (§6.4), and those are replaced only at an epoch boundary.
+**Revocation is asymmetric in effect, and both sides are closed deliberately.** Write capability ends because every routine proof must show the credential's leaf absent from the revocation set at the current epoch (§9.1); the leaf itself never leaves the accumulator (§5.2), and does not need to. Read capability ends through the tag-key broadcast: a revoked member already holds the current epoch's `K_tag_e` (§6.4) — and, when a later version gates content under per-epoch keys (proposal 0029), whatever content keys were delivered alongside it — and those are replaced only at an epoch boundary.
 
 Revocation itself is decided through the quorum machine of §4.3 (proposal 0021): a proposal whose subject derives under the revocation domain tag over the leaf being revoked, approved with the ordinary policy-approval action, executed at the governance quorum. Its execution inserts the leaf into the revocation set and forces the boundary below — which is also what expires every other open proposal and session, this one having been consumed first.
 
@@ -944,7 +944,7 @@ This flow is the quorum machine of §4.3 without residue (proposal 0021): the su
 
 With multi-party (MPC) key custody in place (per §4.4, once implemented), dissolution is a genuine mathematical fact, not a promise: once enough key shares are independently destroyed that the reconstruction threshold can no longer be met, the master key is information-theoretically unrecoverable, regardless of what any remaining party does.
 
-**Effects:** existing accumulator roots for the agora are frozen; no new attestations, admissions, or content can be produced; existing content ciphertexts become permanently undecryptable once the ABE master key is destroyed; historical attestation proofs remain checkable against their frozen root for as long as any member retains a cached copy, but Skiora's ability to serve new verifications for this agora ends.
+**Effects:** existing accumulator roots for the agora are frozen; no new attestations, admissions, or content can be produced; when a later version encrypts content under agora-held keys (proposal 0029), existing ciphertexts become permanently undecryptable once those keys are destroyed; historical attestation proofs remain checkable against their frozen root for as long as any member retains a cached copy, but Skiora's ability to serve new verifications for this agora ends.
 
 **Quorum requirement, deliberate:** single-party dissolution risks both a coerced founder unilaterally destroying the agora and accidental/malicious unilateral action. Requiring quorum trades speed for safety-against-coercion — an explicit tradeoff the trust committee should set deliberately per agora, since a group facing an imminent, active threat may reasonably prefer a faster, lower-quorum emergency dissolution path than a lower-urgency group would.
 

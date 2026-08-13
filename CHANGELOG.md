@@ -175,6 +175,17 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and fetching is I/O, which is the host's.
 
 ### Changed
+- **Content gating is deferred; the broadcast carries the keys** (§6.4, §7, §11, §12;
+  proposal 0029). Three sections leaned on an attribute-based-encryption content-gating
+  mechanism that no section defines and nothing implements: §6.4 named it as `K_tag_e`'s
+  distribution channel while §11 named the boundary broadcast, and §12 destroyed an "ABE
+  master key" at dissolution. The spec now agrees with itself and the code: the boundary
+  broadcast is the distribution channel for every per-epoch member key, revocation is
+  the delivery cut, and tier-gated content encryption is a later-version mechanism —
+  with the deferral's cost stated plainly (this version gates standing and services, not
+  content at rest) and the reintroduction constrained to compose with the broadcast,
+  per-agora isolation, and §15's shared-secret blast radius. Two doc comments updated;
+  no mechanism changed.
 - **Numeric credential attributes are deferred** (§2, §5.1, §9.3, §15; proposal 0028).
   The specification told two stories about what a credential is: §5.1's attribute-bearing
   BBS+-style object (hidden `tier`, `vouch_count`, `tenure_start`) and §9.1's leaf
