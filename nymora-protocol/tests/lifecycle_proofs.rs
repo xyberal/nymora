@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! Phase 3 meets phase 4: proofs produced from material the credential lifecycle
-//! **stored**, not fabricated inline.
+//! The credential lifecycle meets the proof layer: proofs produced from material the
+//! lifecycle **stored**, not fabricated inline.
 //!
 //! The exit criteria these tests carry: every action proves and verifies from stored
 //! material across two agoras with adversarially identical entropy; a swept epoch can no

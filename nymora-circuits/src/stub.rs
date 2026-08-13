@@ -32,7 +32,7 @@
 //! inputs, taken at prove time, and verification first requires the presented inputs to
 //! match. The digest's encoding is local to this backend — deliberately not a protocol
 //! domain tag, because the real transcript encoding belongs to the proving system and
-//! pinning a stand-in here would be pinning the thing phase 4 must not pin.
+//! pinning a stand-in here would be pinning the one thing this backend must leave open.
 //!
 //! Sizes follow the provisional schemes and are unpinned by every test; the proof types
 //! redact themselves in `Debug` like the secrets they contain.
@@ -122,7 +122,7 @@ fn migration_binding(public: &MigrationPublicInputs) -> [u8; 32] {
     hasher.finalize().into()
 }
 
-/// The phase-4 backend: proves by checking, verifies by re-checking.
+/// The stand-in backend: proves by checking, verifies by re-checking.
 ///
 /// Stateless — a real backend holds proving and verifying artifacts here, which is why
 /// the trait takes `&self`.

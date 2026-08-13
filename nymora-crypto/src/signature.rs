@@ -6,8 +6,9 @@
 //!
 //! The root authority signs two certificates (§9.1, §9.3), and both are verified *inside*
 //! the standardized circuit (§6.5) — which fixes the real scheme with the proving system,
-//! the same fault line that leaves the algebraic hash provisional. Through phase 3 nothing
-//! verified those signatures, so the software key store could honestly use keyed hashes.
+//! the same fault line that leaves the algebraic hash provisional. Before the stub prover,
+//! nothing verified those signatures, so the software key store could honestly use keyed
+//! hashes.
 //! The stub prover ends that: it must check "this certificate verifies under `pk_root`"
 //! while holding only the public key, and no keyed hash can satisfy a public-verification
 //! clause for any holder of the public value alone.
@@ -18,7 +19,7 @@
 //! over exactly a caller-supplied message, and verification under the public key alone.
 //! The **algorithm** is not: Ed25519 here will be replaced by whatever embedded-curve
 //! scheme the proving system makes affordable in-circuit, and every length below moves
-//! with it. Size buffers from these constants and carry lengths explicitly — the phase-3
+//! with it. Size buffers from these constants and carry lengths explicitly — the standing
 //! rule that no test may pin the stand-in's sizes exists so that replacement is a
 //! recompilation, not an excavation.
 //!

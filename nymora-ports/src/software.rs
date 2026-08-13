@@ -18,7 +18,7 @@
 //!
 //! # The signatures are real now, and provisional
 //!
-//! Through phase 3 this backend's "signatures" were keyed hashes, on a documented premise:
+//! Before the stub prover, this backend's "signatures" were keyed hashes, on a documented premise:
 //! nothing verified them, and nothing should, because the real scheme is fixed with the proving
 //! system (§6.5) and anything committed early would prejudge that choice. The stub prover ended
 //! the premise — it must check "this certificate verifies under `pk_root`" holding only the
@@ -290,7 +290,7 @@ mod tests {
         assert_ne!(root_of(&store(), AGORA_A), root_of(&other, AGORA_A));
     }
 
-    /// The property phase 4 exists to use: what this backend signs, anyone holding the
+    /// The property the proof layer relies on: what this backend signs, anyone holding the
     /// public key from `create_root` can verify — including the stub prover recomputing
     /// the canonical payload from witness values.
     #[test]

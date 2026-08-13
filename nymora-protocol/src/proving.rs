@@ -2,8 +2,8 @@
 
 //! Witness assembly: from a member's stored material to the statement types (§9.1).
 //!
-//! This is the seam between phase 3 and phase 4: everything the credential lifecycle
-//! stores, loaded back as the witnesses a proof consumes. It lives in `nymora-protocol`
+//! This is the seam between the credential lifecycle and the proof layer: everything the
+//! lifecycle stores, loaded back as the witnesses a proof consumes. It lives in `nymora-protocol`
 //! because assembly reads `SecureStorage`, and this is the crate that drives the ports —
 //! `nymora-proofs` stays pure and takes the assembled witness.
 //!

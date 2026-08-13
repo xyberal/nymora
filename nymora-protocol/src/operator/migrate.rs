@@ -2,8 +2,8 @@
 
 //! The operator's side of planned migration (§9.3, path 1).
 //!
-//! The member's side existed by the end of phase 3 — authorize on the old device,
-//! complete on the new, prove with the phase-4 migration statement. This is the acceptance
+//! The member's side lives in the credential lifecycle — authorize on the old device,
+//! complete on the new, prove with the migration statement. This is the acceptance
 //! path: verify the proof, spend the old leaf, admit the successor.
 //!
 //! # The spend's timing is the accepted window
@@ -39,7 +39,7 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
     /// already spent, not already staged" lives.
     ///
     /// One class per migration, because the statement proves presence in one class root —
-    /// a limitation of the phase-4 statement shape recorded here deliberately: whether a
+    /// a limitation of the current statement shape recorded here deliberately: whether a
     /// multi-class credential migrates atomically is a question for the real circuit's
     /// design (§6.5), and pretending to answer it now with N separate spends would spend
     /// the same nullifier N times.

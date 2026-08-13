@@ -8,8 +8,7 @@
 //! as types: the membership chain of §9.1 with its action-specific final clause
 //! ([`statement`]), and the migration statement of §9.3 beside it. The [`ProofSystem`]
 //! trait is the boundary everything above builds against; the real circuit arrives behind
-//! it in a later phase, and until then the [`stub`] backend evaluates the same statements
-//! in the clear.
+//! it, and until then the [`stub`] backend evaluates the same statements in the clear.
 //!
 //! The statement types sit behind the provisional feature because every clause is
 //! expressed over the stand-in algebraic hash and the provisional witness structures. The

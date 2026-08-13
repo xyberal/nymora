@@ -343,8 +343,8 @@ pub fn load_epoch_record<'a>(
 ///
 /// Several epochs' keys are live at once: §11's revocation asymmetry means read capability
 /// persists until the next broadcast, and older keys are what resolve older content. When
-/// a key is *discarded* is a §6.4 retention question this phase deliberately does not
-/// settle; nothing here deletes tag keys.
+/// a key is *discarded* is a §6.4 retention question deliberately left unsettled here;
+/// nothing here deletes tag keys.
 ///
 /// # Errors
 ///
@@ -445,7 +445,7 @@ pub fn authorize_migration(
 ///
 /// The returned pieces — new commitment, spend nullifier, plus the certificate the caller
 /// already holds — are what `credentials/migrate` submits under the migration proof; the
-/// proof itself is a later phase's interface.
+/// proof itself is the proof layer's interface (`nymora-proofs`).
 ///
 /// # Errors
 ///
@@ -554,8 +554,8 @@ mod tests {
     const AGORA_B: AgoraId = AgoraId::from_bytes([0x02; 32]);
 
     /// An in-memory `SecureStorage` that records every mutation, in order, and can be told
-    /// to start failing after a number of stores — the double 3.5 of the phase plan asks
-    /// for.
+    /// to start failing after a number of stores — so the unwind-on-failure contract is
+    /// testable at every mutation point.
     #[derive(Default)]
     struct TestStore {
         values: HashMap<([u8; 32], Slot), Vec<u8>>,
@@ -1005,7 +1005,7 @@ mod tests {
         );
     }
 
-    /// The phase's exit criterion, in one test: the full lifecycle — create, certify,
+    /// This module's exit criterion, in one test: the full lifecycle — create, certify,
     /// roll, migrate — across two agoras, on the reference backend and the test store,
     /// with the same entropy fed to both memberships adversarially. No value derived in
     /// one agora may equal its counterpart in the other, and the migration in one must

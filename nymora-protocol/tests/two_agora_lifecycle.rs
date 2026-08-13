@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The phase-5 milestone: the complete lifecycle, end to end, across **two agoras**, with
+//! The full-lifecycle milestone: everything, end to end, across **two agoras**, with
 //! software keys and stub proofs — and the negative class as explicit assertions.
 //!
 //! One person — Dana — belongs to both agoras through the same "device" (the same seed,

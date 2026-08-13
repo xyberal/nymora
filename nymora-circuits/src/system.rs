@@ -5,8 +5,8 @@
 //! Everything above this trait — the action API in `nymora-proofs`, witness assembly and
 //! state machines in `nymora-protocol` — is written against it and never learns which
 //! backend produced a proof. The stub backend (this crate, `stub-prover` feature) is the
-//! phase-4 implementation; the real circuit replaces it behind the same trait in phase 6,
-//! and nothing above recompiles differently.
+//! stand-in implementation; the real circuit replaces it behind the same trait, and
+//! nothing above recompiles differently.
 
 use crate::statement::{ChainPublicInputs, ChainWitness, MigrationPublicInputs, MigrationWitness};
 use nymora_core::ProtocolError;

@@ -624,7 +624,7 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
     /// Roots stay in history and the log gains its final entry; the tag secret is
     /// destroyed so no future epoch's key can ever exist. With software custody this
     /// destruction is best-effort erasure; the *provable* destruction §12 promises arrives
-    /// with the MPC ceremony work, out of this phase's scope.
+    /// with the MPC custody work (§4.4), which is roadmap rather than this module.
     fn dissolve(&mut self) {
         self.dissolved = true;
         self.sessions.clear();
