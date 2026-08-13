@@ -41,3 +41,23 @@ jobs:
           cargo test -p nymora-accumulator --no-default-features
       - name: License headers
         run: ./scripts/check-license-headers.sh
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The scan covers history, not just the tree: a secret committed and later
+          # deleted still travels with every clone.
+          fetch-depth: 0
+      - name: Install gitleaks
+        env:
+          VERSION: 8.30.1
+        run: |
+          curl -sSfL -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz"
+          tar -xzf gitleaks.tar.gz gitleaks
+          install -m 0755 gitleaks /usr/local/bin/gitleaks 2>/dev/null || sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+      # Configuration and allowlist: .gitleaks.toml at the workspace root.
+      - name: Scan tree and history
+        run: gitleaks git --no-banner --redact .

@@ -6,6 +6,13 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **The workspace carries its own secret scan.** CI gains a gitleaks job over the tree
+  and the full history (a secret committed and later deleted still travels with every
+  clone), configured by a new `.gitleaks.toml` whose allowlist is narrow and argued per
+  entry: domain-separation tags are public protocol constants that must appear verbatim,
+  and the conformance vectors exist to be published — their structural safety is that
+  the test harness fails on any value the code does not compute from the inputs beside
+  it.
 - **The bulletin is a signed operator statement** (§9.1, §10.1, §11; proposal 0024,
   applied). The boundary bulletin is meant to be cached, relayed, and fetched through
   hosts a member does not trust, so it now carries its own authenticity: a canonical

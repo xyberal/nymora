@@ -1,0 +1,44 @@
+# Secret-scan configuration for this workspace (gitleaks).
+#
+# CI runs gitleaks over the working tree and the full history — history matters as much
+# as the tree, because a secret committed and later deleted still travels with every
+# clone. Deleting the file does not remove it from history.
+#
+# Allowlist entries must stay NARROW. Excluding a whole file would mask a real secret
+# committed to it later — each entry below therefore matches a specific, recognisable
+# class of public constant, and says why it is not a secret. Path patterns tolerate a
+# prefix so the same scan works wherever this workspace sits below the scan root.
+
+title = "Nymora secret scan"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Public protocol constants and build artifacts."
+
+regexes = [
+  # Domain-separation tags (nymora-core/src/domain.rs). These are public, versioned
+  # protocol constants that MUST appear in the source verbatim — the whole point is that
+  # every implementation hashes the same bytes. Names like "tag/key" and "epoch-key" trip
+  # the generic-api-key rule on the word "key".
+  '''nymora/v[0-9]+/[a-z0-9/-]+''',
+]
+
+paths = [
+  # Build output — not source, and slow to scan.
+  '''target/''',
+  '''Cargo\.lock$''',
+
+  # Conformance vectors. These files exist to be published: a second implementation cannot
+  # check itself against values it cannot read. Every input is a fixed, arbitrary constant
+  # chosen for the vector, and the derived values are outputs of public functions over those
+  # constants — including one under a field named `key`, which is a routing-tag key derived
+  # from a seed printed three lines above it.
+  #
+  # This is the one place the "never exclude a whole file" rule is relaxed, and the reason it
+  # is safe here is structural rather than a judgement call: the harness fails if any value
+  # in these files does not match what the code computes from the inputs beside it. A real
+  # secret pasted in would have to satisfy that check, which it cannot.
+  '''nymora-[a-z]+/vectors/[^/]+\.json$''',
+]
