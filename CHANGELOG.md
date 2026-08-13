@@ -288,6 +288,15 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   which is what `Unavailable` would imply.
 
 ### Fixed
+- **The quorum floor is one** (§4.3, §5.3; proposal 0027). `Decision::Policy` accepted a
+  zero governance quorum and a zero admission threshold, and execution compares approvals
+  with `>=` — so one member-approved zero would have made every subsequent execution
+  vacuously approved, handing the operator alone the power to raise and execute
+  revocations and dissolution, and a zero threshold admitted on no attestation. Zero now
+  refuses as `Malformed` at both entry points: `propose` (a proposal that could never
+  validly execute must not open and gather approvals) and `create` (a zero-threshold
+  founding is self-inconsistent). Both are pinned by tests; the legitimate §4.1 founding
+  minimum — quorum 1, threshold 1 — is unchanged.
 - **A leaf lands at most once per class** (§5.2; proposal 0026). The staged-admission
   list had no duplicate check, so two vouch sessions racing for one candidate could both
   finalize and land the same commitment twice — burning terminal capacity (§5.2) and

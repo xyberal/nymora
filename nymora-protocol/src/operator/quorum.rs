@@ -51,6 +51,10 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
     ///
     /// [`ProtocolError::Rejected`] for an unknown approving class, a policy decision
     /// naming an unknown class, or a dissolved agora — indistinguishably.
+    /// [`ProtocolError::Malformed`] for a policy decision naming a zero admission
+    /// threshold or a zero governance quorum (proposal 0027): a proposal that could
+    /// never validly execute must not open and gather approvals, and a zero in the
+    /// caller's own input discloses no state, so the uniform refusal is not needed.
     pub fn propose(
         &mut self,
         decision: Decision,
@@ -59,8 +63,19 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
     ) -> Result<SubjectId, ProtocolError> {
         self.live()?;
         self.class(approving_class)?;
-        if let Decision::Policy { class, .. } = &decision {
+        if let Decision::Policy {
+            class,
+            admission_threshold,
+            governance_quorum,
+        } = &decision
+        {
             self.class(*class)?;
+            if *admission_threshold == 0 || *governance_quorum == 0 {
+                // Proposal 0027: one is the floor. A zero quorum makes every later
+                // execution vacuously approved — the operator's alone to raise and
+                // execute — and a zero threshold admits on no attestation.
+                return Err(ProtocolError::Malformed);
+            }
         }
         let nonce = nonce_entropy.take();
         let subject = subject_id(self.agora, self.epoch, approving_class, &decision, &nonce);

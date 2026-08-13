@@ -31,7 +31,7 @@ use nymora_proofs::{
 };
 use nymora_protocol::live_auth::Contribution;
 use nymora_protocol::operator::{
-    conforms, equivocation, verify_log, AgoraState, Executed, LogEntry,
+    conforms, equivocation, verify_log, AgoraState, ClassPolicy, Executed, Founding, LogEntry,
 };
 use nymora_protocol::{
     authorize_migration, complete_migration, create_successor_root, load_acting_material, Decision,
@@ -942,6 +942,72 @@ fn an_exhausted_class_refuses_at_the_door() {
             .unwrap_err(),
         ProtocolError::Rejected
     );
+}
+
+// ---- §4.3: the quorum floor (proposal 0027) ----
+
+/// Zero never opens: a policy proposal naming a zero governance quorum or a zero
+/// admission threshold is malformed at raise. A zero quorum would make every later
+/// execution — revocation and dissolution included — vacuously approved, the operator's
+/// alone; a zero threshold admits on no attestation.
+#[test]
+fn zero_thresholds_never_open() {
+    let mut alice = member(0x11);
+    let mut op = founded(&mut alice, false);
+    assert_eq!(
+        op.propose(
+            Decision::Policy {
+                class: TIER2,
+                admission_threshold: 0,
+                governance_quorum: 2,
+            },
+            TIER2,
+            entropy(0x61),
+        )
+        .unwrap_err(),
+        ProtocolError::Malformed,
+        "a zero admission threshold opened"
+    );
+    assert_eq!(
+        op.propose(
+            Decision::Policy {
+                class: TIER2,
+                admission_threshold: 2,
+                governance_quorum: 0,
+            },
+            TIER2,
+            entropy(0x62),
+        )
+        .unwrap_err(),
+        ProtocolError::Malformed,
+        "a zero governance quorum opened"
+    );
+}
+
+/// The floor holds at founding too: a class configured with a zero admission threshold
+/// is refused as self-inconsistent, like any other malformed founding (proposal 0027).
+#[test]
+fn a_zero_threshold_founding_is_malformed() {
+    let alice = member(0x11);
+    let result: Result<Op, _> = AgoraState::create(
+        StubProver,
+        &Founding {
+            agora: AGORA,
+            genesis: GENESIS,
+            founder: alice.leaf,
+            classes: &[(
+                TIER2,
+                ClassPolicy {
+                    voucher_class: TIER2,
+                    admission_threshold: 0,
+                },
+            )],
+            founder_classes: &[TIER2],
+        },
+        entropy(0x1b),
+        None,
+    );
+    assert_eq!(result.err(), Some(ProtocolError::Malformed));
 }
 
 // ---- §5.2: staging integrity (proposal 0026) ----

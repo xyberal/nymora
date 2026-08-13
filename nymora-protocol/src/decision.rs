@@ -44,9 +44,11 @@ pub enum Decision {
     Policy {
         /// The class whose admission policy changes.
         class: PolicyClass,
-        /// Attestations required to admit into `class` (§5.3).
+        /// Attestations required to admit into `class` (§5.3). At least 1
+        /// (proposal 0027).
         admission_threshold: u32,
-        /// Approvals required to execute any subsequent quorum decision.
+        /// Approvals required to execute any subsequent quorum decision. At least 1
+        /// (proposal 0027): zero would make every execution vacuously approved.
         governance_quorum: u32,
     },
     /// Remove a credential's standing (§11). The leaf enters the revocation set and the

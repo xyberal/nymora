@@ -105,7 +105,8 @@ pub struct ClassPolicy {
     /// The class whose members' attestations count toward admission into this one —
     /// `Root_voucher_eligible` in §5.3's terms. May be the class itself.
     pub voucher_class: PolicyClass,
-    /// Attestations required to admit (§5.3's k).
+    /// Attestations required to admit (§5.3's k). At least 1 (proposal 0027); a zero
+    /// here refuses the founding as self-inconsistent.
     pub admission_threshold: u32,
 }
 
@@ -243,8 +244,9 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
     /// # Errors
     ///
     /// [`ProtocolError::Malformed`] when the configuration is not self-consistent: no
-    /// classes, a voucher class that is not itself configured, or a founder class that is
-    /// not configured. These are properties of the caller's input, not of hidden state.
+    /// classes, a voucher class that is not itself configured, a founder class that is
+    /// not configured, or a zero admission threshold (proposal 0027). These are
+    /// properties of the caller's input, not of hidden state.
     pub fn create(
         system: S,
         founding: &Founding<'_>,
@@ -285,6 +287,10 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
             );
         }
         for (_, policy) in founding.classes {
+            if policy.admission_threshold == 0 {
+                // Proposal 0027: zero admits on no attestation at all.
+                return Err(ProtocolError::Malformed);
+            }
             if !state.classes.contains_key(&policy.voucher_class) {
                 return Err(ProtocolError::Malformed);
             }
