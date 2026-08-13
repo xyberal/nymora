@@ -31,7 +31,7 @@ Read alongside:
 | **Persora** | The client application — web or native — that a member uses to hold their credential, generate proofs and pseudonyms, and interact with an agora's Skiora. The "mask" a member wears when presenting themselves anonymously. |
 | **`agora_id`** | Opaque, self-generated identifier for an agora — derived from its own public key material, not issued or tracked by any external party. |
 | **Tier** | A membership level within an agora, gating access to content and privileges. |
-| **Credential** | A member's anonymous, attribute-bearing cryptographic identity within one agora. |
+| **Credential** | A member's anonymous cryptographic identity within one agora — a leaf commitment over its key material (§9.1). Numeric hidden attributes are deferred (§5.1, proposal 0028). |
 | **Accumulator** | A Merkle tree whose root represents the current set of valid entries (members, voucher-eligible members, etc.) for a policy class. |
 | **Nullifier** | A per-context deterministic hash derived from a member's secret key, used to enforce distinctness (no double-vouching, no double-attesting) without revealing identity. |
 | **Attestation** | A zero-knowledge proof that a valid credential authored a specific piece of content. |
@@ -195,17 +195,15 @@ From this point forward, no single member — including the founder — can unil
 
 ### 5.1 Credentials
 
-Each credential is an anonymous, attribute-bearing object (BBS+-style signature or equivalent) held privately by its owner:
+Each credential is an anonymous cryptographic identity held privately by its owner: a leaf commitment over the member's key material, bound to its agora —
 
 ```
-credential = {
-  tier: <hidden attribute>,
-  vouch_count: <hidden attribute>,
-  tenure_start: <hidden attribute>
-}
+leaf = Commit(pk_root, sk_cred, r_root, agora_id)     -- normative in §9.1
 ```
 
-Attributes are provable in zero knowledge (e.g., "tier ≥ 2", "tenure ≥ 6 months") without revealing exact values, and — critically — **without revealing relative ordering or comparison against any other credential.** No API exposes "which credential is oldest" or "how many vouches does X have relative to Y." Thresholds themselves can optionally be evaluated by a Proof Generation service so that even the credential holder never learns the exact numeric policy constants, only a binary grant/deny.
+**Tier is class membership.** A credential's tier is not a value it carries but a set it belongs to: each tier and eligibility rule is its own policy class with its own accumulator (§5.2), and "tier ≥ 2" is proven as membership in the Tier2 class root. A proof therefore discloses only the class it was proven against — never a numeric value, and — critically — **never relative ordering or comparison against any other credential.** No API exposes "which credential is oldest" or "how many vouches does X have relative to Y"; for the predicates this version supports, that holds because there is no number to compare, not because a range proof hides one.
+
+**Numeric hidden attributes are deferred to a later protocol version** (proposal 0028). An attribute-bearing credential — BBS+-style, with hidden `vouch_count` and `tenure_start`, range predicates such as "tenure ≥ 6 months", optionally evaluated so even the holder never learns the exact policy constants — adds expressive admission policy, but attributes live in the leaf the standardized circuit opens (§6.5), so adding them is a protocol-version event, not a feature flag, and every requirement of this section — non-comparability above all — must be re-established inside that design. Until then, policies express what class membership can: thresholds of attestations by eligible classes (§5.3).
 
 **Credentials are per-agora and mutually unlinkable.** A member holding credentials in several agoras holds a wholly separate credential in each. This is a normative requirement, not an implementation preference, and it is what §13's statement that one Persora may serve any number of agoras depends on:
 
@@ -746,11 +744,11 @@ POST /agora/{agora_id}/credentials/migrate
 
 The migration certificate's signed message is canonical for the same reason the epoch certificate's is (§9.1): the domain tag `nymora/v0/migration-cert`, the `agora_id`, and `pk_root_new`, in that order, each field length-framed as in §6.6. It is verified inside a proof, so the bytes must agree between every implementation and the circuit.
 
-The migration is verified (ideally itself wrapped in a ZK proof rather than transmitted with `pk_root_old` in the clear, consistent with this design's general avoidance of exposing linkable identifiers) against the old, still-valid leaf. On success, the agora's accumulator attributes — tenure, vouch count, tier — carry over to the new leaf, and the old leaf is consumed via a migration-specific nullifier, preventing a still-live old key from being used to spawn more than one successor credential.
+The migration is verified (ideally itself wrapped in a ZK proof rather than transmitted with `pk_root_old` in the clear, consistent with this design's general avoidance of exposing linkable identifiers) against the old, still-valid leaf. On success, the credential's standing carries over: the successor leaf enters the class the consumed leaf occupied (its tier, §5.1), and the lineage key `sk_cred` carries with it (below) — numeric attributes, when a later version adds them (proposal 0028), carry here too. The old leaf is consumed via a migration-specific nullifier, preventing a still-live old key from being used to spawn more than one successor credential.
 
 The nullifier consuming the old leaf is `Hash(sk_cred, leaf_old, agora_id)` under its own domain. It is bound to the specific leaf being consumed, not only to the credential: `sk_cred` carries across the lineage deliberately (below), so a derivation over the key alone would be constant for the credential's life — spent once at the first migration and colliding at every subsequent one. Binding the leaf gives each migration its own spend while preserving the property that one leaf admits one successor. The consumed leaf enters the migration-spend set (§9.1) at the next epoch boundary — exclusion roots are fixed per epoch — so a superseded device retains write capability for at most the remainder of the epoch: the same bound a compromised `sk_epoch` already carries (§9.1), accepted because migration, unlike revocation (§11), is the member's own cooperative act.
 
-The successor leaf commits to the **same** `sk_cred` as the leaf it replaces, proven in zero knowledge alongside the migration itself. Were a fresh key generated instead, each migration would launder the nullifier consuming the previous leaf, and a member could spawn successor credentials without limit — every one of them carrying the tenure, vouch count, and tier of the original. Path 2 cannot preserve `sk_cred`, since it presumes the old key is unreachable; uniqueness resets there, gated by the quorum revocation that path already requires.
+The successor leaf commits to the **same** `sk_cred` as the leaf it replaces, proven in zero knowledge alongside the migration itself. Were a fresh key generated instead, each migration would launder the nullifier consuming the previous leaf, and a member could spawn successor credentials without limit — every one of them carrying the original's standing. Path 2 cannot preserve `sk_cred`, since it presumes the old key is unreachable; uniqueness resets there, gated by the quorum revocation that path already requires.
 
 **Path 2 — lost, stolen, or seized device (old device unreachable).** No migration certificate can be produced without the old key, so this path falls back to ordinary quorum-based revocation (§11) of the old credential, followed by fresh admission on new hardware via the standard vouching flow (§5.3). No continuity is preserved — this is the accepted cost when the old key genuinely cannot be reached. The group may choose to accelerate re-vouching for a known, previously-vouched member (existing vouchers can re-attest quickly, since the real-world trust judgment hasn't changed, only the cryptographic anchor), but the resulting credential is, structurally, new.
 

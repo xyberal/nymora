@@ -175,6 +175,18 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and fetching is I/O, which is the host's.
 
 ### Changed
+- **Numeric credential attributes are deferred** (§2, §5.1, §9.3, §15; proposal 0028).
+  The specification told two stories about what a credential is: §5.1's attribute-bearing
+  BBS+-style object (hidden `tier`, `vouch_count`, `tenure_start`) and §9.1's leaf
+  commitment over key material, which is what the circuit, the vectors, and the whole
+  implementation are built on. §5.1 now states the leaf as the credential, tier as class
+  membership (a class-membership proof discloses no number to compare, so
+  non-comparability holds structurally), and numeric attributes as deferred to a later
+  protocol version — a protocol-version event, since attributes change the leaf the one
+  standardized circuit opens. §9.3's carry-over states what migration actually preserves
+  (class and `sk_cred` lineage); §15's costs read "standing" rather than enumerating
+  attributes this version does not have. No mechanism changed: the implementation
+  already was the deferred version.
 - **Pre-publication re-read, editorial pass**: the workspace `README` now states the
   actual status — complete protocol logic on a stub prover and provisional primitives,
   nothing deployable — and its crate table describes what the crates contain rather than

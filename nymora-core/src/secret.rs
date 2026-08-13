@@ -94,8 +94,7 @@ pub struct RootOpening(SecretBytes<32>);
 ///
 /// It carries across planned migration rather than being regenerated. A fresh key would
 /// launder the nullifier consuming the previous leaf, letting one credential spawn
-/// successors without limit — each inheriting the original's tenure, vouch count, and tier
-/// (§9.3).
+/// successors without limit — each inheriting the original's standing (§9.3).
 ///
 /// Authorship (§6.1) deliberately does *not* use this. Its objects are public, so a durable
 /// key there would let an adversary holding it recompute nullifiers over every published
