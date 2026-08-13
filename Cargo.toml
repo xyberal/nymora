@@ -1,4 +1,4 @@
-# nymora — the open Nymora protocol library (self-contained; builds in isolation).
+# nymora — the Nymora protocol library.
 # See ARCHITECTURE.md for the crate graph and the pure-engine-plus-ports model.
 [workspace]
 resolver = "2"

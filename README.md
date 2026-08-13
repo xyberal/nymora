@@ -36,8 +36,9 @@ cargo build --workspace
 cargo test  --workspace
 ```
 
-This workspace is designed to build and test in complete isolation — it depends on nothing
-outside itself.
+The workspace is self-contained: no services, no platform dependencies, nothing to
+configure — its only third-party dependencies are a handful of widely used cryptography
+crates.
 
 ## License
 

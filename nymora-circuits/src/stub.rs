@@ -9,9 +9,9 @@
 //! verifications, the commitment openings, the Merkle inclusion, both absence clauses, and
 //! the action's derivation are all evaluated — in the clear — against exactly the witness
 //! and public-input types the real prover will take. A protocol built and tested on this
-//! backend is making claims the circuit can later discharge, which is the entire point
-//! (SETUP's rule: a stub that asserts something no circuit could prove builds a protocol
-//! that cannot be made real).
+//! backend is making claims the circuit can later discharge, which is the entire point —
+//! the standing rule here: a stub that asserts something no circuit could prove builds a
+//! protocol that cannot be made real.
 //!
 //! # What it is dishonest about, and loudly
 //!

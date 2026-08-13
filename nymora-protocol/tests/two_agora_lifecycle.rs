@@ -10,8 +10,8 @@
 //! planned migration, lost-device recovery, and dissolution — each in the agora where it
 //! belongs, with the other agora asserted untouched and uncorrelated at every step.
 //!
-//! Cross-agora isolation is proved by demonstrating the *absence* of relationships
-//! (SETUP's negative class): identifiers, leaves, nullifiers, pseudonyms, tags, tag keys,
+//! Cross-agora isolation is proved by demonstrating the *absence* of relationships —
+//! the negative class: identifiers, leaves, nullifiers, pseudonyms, tags, tag keys,
 //! subjects, and roots are compared pairwise and required distinct, and one agora's
 //! terminal event — dissolution — is required invisible in the other.
 
