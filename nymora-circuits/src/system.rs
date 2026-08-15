@@ -15,8 +15,9 @@ use nymora_core::ProtocolError;
 ///
 /// `DEPTH` is the accumulator depth the statements quantify over. The real circuit fixes
 /// one value network-wide — a per-agora depth would be a per-agora proof shape, the §6.5
-/// fingerprinting vector — but the trait carries it generically so that tests exercise
-/// small trees and the eventual pin is one line.
+/// fingerprinting vector; proposal 0030 makes the constant's scope normative — but the
+/// trait carries it generically so that tests exercise small trees and the eventual pin
+/// is one line.
 ///
 /// # Soundness at both ends
 ///

@@ -6,6 +6,15 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Accumulator depth is a protocol constant** (§5.2, §6.5; proposal 0030, applied).
+  The specification told founders to size depth per agora at creation while the circuit
+  layer held that one value is fixed network-wide; the layers now agree, on the side the
+  fingerprinting argument forces: the membership path lives inside the one standardized
+  circuit, so its length — the depth — is part of the proof shape §6.5 keeps uniform.
+  The proposal settles the constant's *scope* now and defers its *value* to the real
+  circuit's measured constraint counts, the same discipline proposal 0001 established.
+  No code changes beyond doc comments: the const generic `DEPTH` running through the
+  crates is the implementation mechanism for a constant pinned per protocol version.
 - **Publishing to crates.io is disabled.** Every crate now carries `publish = false`
   (inherited from the workspace): the primitives are provisional (§15) and nothing here
   is releasable as a library yet. The guard is lifted deliberately, not by accident,
