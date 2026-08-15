@@ -6,6 +6,10 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Publishing to crates.io is disabled.** Every crate now carries `publish = false`
+  (inherited from the workspace): the primitives are provisional (§15) and nothing here
+  is releasable as a library yet. The guard is lifted deliberately, not by accident,
+  when that changes.
 - **A contributor's guide.** `CONTRIBUTING.md` states the three load-bearing
   conventions up front — normative changes start as proposals, a mechanism change is
   one commit touching spec, code, and vectors, section numbers are never renumbered —

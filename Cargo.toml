@@ -18,6 +18,8 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 rust-version = "1.81"   # core::error::Error (nymora-core is no_std)
 repository = "https://github.com/xyberal/nymora"
+# Provisional primitives (§15): nothing here is releasable to crates.io yet.
+publish = false
 
 # Every crate in this workspace inherits these lints (see `[lints] workspace = true`).
 [workspace.lints.rust]
