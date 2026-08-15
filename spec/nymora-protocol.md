@@ -390,6 +390,8 @@ For authorship:
 
 On the wire: a small, fixed-size proof blob plus `message_hash` and `nullifier`. No `agora_id` or root value is transmitted as a labeled field in the bundle — a verifier resolves both out-of-band via the tag mechanism (§6.4) before checking the proof.
 
+**The uniform-shape requirement targets externally published bundles** (proposals 0001, 0031). A proof that travels only member-to-Skiora and never further — migration (§9.3), and governance actions such as re-keying (§4.4) and dissolution (§12) — may use a distinct statement and shape without weakening the property, which exists to prevent fingerprinting of *published* content back to a group. The migration statement already stands on this rule; a heavier governance circuit (for instance, one verifying a hardware signature directly) would be equally legitimate under it, though none is currently specified.
+
 ### 6.6 Full external bundle format
 
 ```json
@@ -590,13 +592,21 @@ The design so far has referred to "`sk`" as a single secret held by Persora. In 
 
 ### 9.1 Root key and epoch keys
 
-Rather than one flat `sk`, each member's credential is split into two tiers:
+Rather than one flat `sk`, each member's credential is split into three tiers, each with a distinct job, usage frequency, and custody model:
 
 ```
-sk_root   — committed (via its public counterpart) in the agora's accumulator; used rarely
+sk_hw     — the hardware anchor: generated inside a hardware authenticator where the
+            platform provides one, non-exportable; binds the credential to its device
+            at creation and protects sk_root's storage (§9.2); never verified inside
+            the standardized circuit
+sk_root   — the protocol root: proving-system-native, committed (via its public
+            counterpart) in the agora's accumulator; signs the epoch and migration
+            certificates; used rarely
 sk_epoch  — freshly generated each epoch and certified by sk_root; used for routine,
             day-to-day operations
 ```
+
+**Why the committed root is proving-system-native rather than a hardware key** (proposal 0001, applied by 0031). The epoch certificate is verified inside the standardized circuit on every routine proof, and a signature the circuit checks cheaply must be native to the proving field. Hardware authenticators sign only with curves foreign to any practical proving field, and the difference is measured, not estimated: an embedded-curve verification adds 6,238 constraints to the statement core, non-native P-256 ECDSA adds 2,541,739 — 407×, measured with every choice favoring the hardware curve (the `measure/` harness; reproducible). Committing a hardware key would impose that cost on every post, vouch, corroboration, and live-authentication handshake, paid by the member's own device. Separating a hardware anchor that signs nothing the circuit sees from a proving-native root the circuit verifies cheaply confines hardware to what it is for — custody — while still binding the credential to real hardware at creation (§9.2).
 
 The accumulator leaf commits to `pk_root` (a public verification key derived from `sk_root`) and to `sk_cred` (below), using an opening value `r_root` fixed once at credential creation, and is bound to the agora it belongs to:
 
@@ -668,7 +678,7 @@ The revocation-set root and migration-spend root are public inputs alongside the
 
 Attribution is bounded with it, with one exception. `sk_cred` is durable by necessity, so an adversary holding it can confirm that two leaves belong to the same credential lineage across a migration. That is a single linkage per migration; it does not extend to content, whose nullifiers expire with the epoch key that produced them.
 
-**What this does not bound:** compromise of `sk_root` itself. Since `sk_root` can sign arbitrary future epoch certificates and is the credential authorized to participate in root-level governance actions (quorum votes, re-keying, dissolution — §5.3, §12), its compromise is effectively total and permanent for that credential, which is precisely why `sk_root` deserves the heavier protection described next, rather than living alongside `sk_epoch` in the same routinely-used storage.
+**What this does not bound:** compromise of `sk_root` itself. Since `sk_root` can sign arbitrary future epoch certificates and is the credential authorized to participate in root-level governance actions (quorum votes, re-keying, dissolution — §5.3, §12), its compromise is effectively total and permanent for that credential. It also reaches the lineage: migration certificates are signed by `sk_root` (§9.3, proposal 0031), so an adversary holding it can migrate the credential out from under its member — at most once per leaf, since the spend nullifier admits one successor, and loudly, since the member's own next proof fails against the spent leaf and the quorum can revoke the successor (§11). Because `sk_root` sits below the hardware boundary (it must sign a proving-native scheme the authenticator does not implement), hardware cannot re-gate it once extracted — §15 states this limitation in full. All of which is precisely why `sk_root` deserves the heaviest custody the platform offers (§9.2), rather than living alongside `sk_epoch` in the same routinely-used storage.
 
 **`r_root` is a blinding value, not authority, and is held in software.** Every proof of root-leaf membership must open `Commit(pk_root, sk_cred, r_root, agora_id)`, which requires `r_root` itself as a witness. No per-epoch substitute is possible: any derivation one-way enough to protect `r_root` is, by construction, unable to open a commitment formed with it. `r_root` is therefore supplied on every routine proof, and cannot meaningfully be held in hardware custody — a value exported on every operation is not hardware-held in any useful sense.
 
@@ -677,7 +687,8 @@ This is acceptable because `r_root` authorizes nothing. Its sole function is to 
 ```mermaid
 graph TD
     HW["Hardware authenticator<br/>(secure enclave / FIDO2 key)<br/><i>§9.2 — non-exportable</i>"]
-    HW -->|generates internally| SKR["sk_root<br/><i>used rarely: epoch certs,<br/>governance quorum actions</i>"]
+    HW -->|generates internally| SKH["sk_hw<br/><i>binds the credential at creation;<br/>wraps sk_root at rest where the<br/>platform allows; never in-circuit</i>"]
+    SKH -.->|"wraps; user presence<br/>gates each unwrap"| SKR["sk_root<br/><i>proving-system-native, software-held;<br/>used rarely: epoch certs, migration,<br/>governance quorum actions</i>"]
     SKR -->|derives| PKR["pk_root<br/><i>committed in accumulator:<br/>leaf = Commit(pk_root, sk_cred,<br/>r_root, agora_id)</i>"]
     SKR -->|"signs each epoch"| CERT["epoch_cert = Sign(sk_root,<br/>{epoch_number, pk_epoch})"]
 
@@ -689,32 +700,36 @@ graph TD
     SKE --> GOV["Policy approval (§5.3)"]
 
     style HW fill:#1a2e1a,stroke:#88aa88,color:#eee
+    style SKH fill:#1a2e1a,stroke:#88aa88,color:#eee
     style SKR fill:#2b2b40,stroke:#aa8888,color:#eee
     style SKE fill:#2b2b40,stroke:#8888aa,color:#eee
     style PKR fill:#1a1a2e,stroke:#8888aa,color:#eee
     style CERT fill:#1a1a2e,stroke:#8888aa,color:#eee
 ```
 
-Compromise of `sk_epoch` and `r_root` (the pair touched by every routine operation) is bounded to one epoch for impersonation purposes: `r_root` grants no authority on its own, and `sk_epoch` expires. Compromise of `sk_root` (touched only rarely, and ideally hardware-bound per §9.2) is total and permanent for that credential — which is exactly why it is never stored or used alongside the routine pair.
+Compromise of `sk_epoch` and `r_root` (the pair touched by every routine operation) is bounded to one epoch for impersonation purposes: `r_root` grants no authority on its own, and `sk_epoch` expires. Compromise of `sk_root` (touched only at certification and migration, wrapped under the hardware anchor where the platform allows — §9.2) is total and permanent for that credential. Compromise of `sk_hw` requires defeating the hardware itself. The three are never stored or used together.
 
 ### 9.2 Hardware-backed custody of the root key
 
-`sk_root` is used rarely (epoch rollover, governance quorum actions) and is catastrophic if exposed — exactly the profile suited to hardware-backed key custody rather than ordinary app-managed storage. The root key's exact construction — one hardware-resident key, or a two-level construction keeping signature verification affordable inside the circuit — is proposal 0001, deferred until the real circuit's constraint counts are measured; nothing in this section changes shape either way except what stands behind the authenticator interface.
+`sk_root` is used rarely (epoch rollover, migration, governance quorum actions) and is catastrophic if exposed — exactly the profile suited to the strongest custody the platform offers. It is proving-system-native (§9.1, proposal 0031), which no hardware authenticator implements, so the construction is two-level: the authenticator holds the **hardware anchor** `sk_hw`, and `sk_root` lives in software under whatever protection `sk_hw` can extend to it.
 
-**Mechanism.** Persora delegates generation and use of `sk_root` to a hardware authenticator — a phone's secure enclave (Apple Secure Enclave, Android StrongBox), a discrete security key (YubiKey-class), or an equivalent FIDO2/WebAuthn-compatible element. The authenticator generates it internally, using its own random number generator; it never leaves the hardware in any form, encrypted or otherwise. Persora holds only a reference to the hardware-resident key and requests operations from it:
+**Mechanism.** Persora delegates root authority to a key-store backend presenting one surface: create the root material for an agora, sign an epoch certificate, sign a migration certificate. Behind that surface a capable backend keeps the two keys. `sk_hw` is generated inside a hardware authenticator — a phone's secure enclave (Apple Secure Enclave, Android StrongBox), a discrete security key (YubiKey-class), or an equivalent FIDO2/WebAuthn-compatible element — using the authenticator's own random number generator, and never leaves it in any form. `sk_root` is generated in software, and `sk_hw`'s first act is to bind it: creation produces, where the platform can attest it, hardware evidence for the new root — the binding the attestation tradeoff below governs — consumed at admission and held by no one afterward.
 
 ```
-Persora → authenticator: "generate a new keypair scoped to agora_id X"
-authenticator → Persora: pk_root   (sk_root never leaves the secure element)
+Persora → backend: "create root material scoped to agora_id X"
+backend  → authenticator: generate sk_hw; bind the fresh pk_root
+backend  → Persora: pk_root, plus the binding evidence where the hardware attests it
 
-Persora → authenticator: "sign this epoch-certificate payload"
-authenticator → prompts for biometric/PIN (user-presence check)
-authenticator → Persora: signature bytes
+Persora → backend: "sign this epoch-certificate payload"
+backend  → prompts for biometric/PIN (user-presence check), unwraps sk_root, signs
+backend  → Persora: signature bytes
 ```
 
-**Per-agora scoping is native to this pattern.** WebAuthn/FIDO2 authenticators already generate a distinct, unrelated keypair per relying-party context by design — treating each `agora_id` as its own relying-party identifier means "one unlinked root credential per agora" (a requirement already established in §5.1) is enforced by the hardware's own architecture, not solely by Persora's own software discipline.
+**Protecting `sk_root` at rest.** Where the authenticator can decrypt or derive a symmetric secret — Secure Enclave via P-256 key agreement, StrongBox via a hardware-held AES key — `sk_root` is stored encrypted under that capability and unwrapped only to sign, behind a user-presence check. Authenticators that can only sign, including typical discrete FIDO2 keys, cannot provide this; on those, `sk_root` falls back to ordinary OS-protected storage. Persora must therefore query the backend's capability rather than assume it, and should tell the member which protection is actually in force — a wrapped root and a merely OS-protected one are different security claims, and presenting one as the other is a false statement to the person relying on it.
 
-**`sk_epoch` and `r_root` remain software-managed.** `sk_epoch` is used on every vouch, post, corroboration, and live-authentication event, and requiring a hardware user-presence prompt for each would be impractical; `r_root` must be supplied as the membership-opening witness on every proof and so cannot be hardware-held at all (§9.1). Both are generated and held by Persora in ordinary (ideally still OS-level-protected, e.g., platform keychain) storage, accepting the exposure described in §9.1 as the practical tradeoff for usability.
+**Per-agora scoping is native to this pattern.** WebAuthn/FIDO2 authenticators already generate a distinct, unrelated keypair per relying-party context by design — treating each `agora_id` as its own relying-party identifier means "one unlinked hardware anchor per agora" (the independence §5.1 requires of every tier's material) is enforced by the hardware's own architecture, not solely by Persora's own software discipline.
+
+**`sk_epoch` and `r_root` remain software-managed, with no wrapping at all.** `sk_epoch` is used on every vouch, post, corroboration, and live-authentication event, and requiring a hardware user-presence prompt for each would be impractical; `r_root` must be supplied as the membership-opening witness on every proof and so cannot be hardware-held at all (§9.1). Both are generated and held by Persora in ordinary (ideally still OS-level-protected, e.g., platform keychain) storage, accepting the exposure described in §9.1 as the practical tradeoff for usability.
 
 **What this defends against, precisely.** Hardware-backed custody closes the most common real-world compromise path: malware or a compromised app silently reading a key out of accessible storage. Secure elements are specifically engineered to resist this, and resisting casual forensic extraction from a seized, locked device is an explicit design goal of most modern implementations.
 
@@ -735,7 +750,8 @@ A direct consequence of non-exportable, hardware-bound root keys: a device chang
 
 ```
 Old device: migration_cert = Sign(sk_root_old, {pk_root_new, agora_id})
-New device: generates a fresh (sk_root_new, r_root_new, pk_root_new) internally, hardware-backed as in §9.2
+New device: generates fresh root material (sk_root_new, r_root_new, pk_root_new) behind
+            the key-store backend as in §9.2
             carries sk_cred over from the old credential — it is not regenerated
 
 POST /agora/{agora_id}/credentials/migrate
@@ -743,6 +759,8 @@ POST /agora/{agora_id}/credentials/migrate
 ```
 
 The migration certificate's signed message is canonical for the same reason the epoch certificate's is (§9.1): the domain tag `nymora/v0/migration-cert`, the `agora_id`, and `pk_root_new`, in that order, each field length-framed as in §6.6. It is verified inside a proof, so the bytes must agree between every implementation and the circuit.
+
+**The certificate is signed by the protocol root, not the hardware anchor, and deliberately** (proposal 0031). It is verified inside the migration proof against the key the consumed leaf commits — which is what keeps migration anonymous. A hardware-signed certificate could not join that chain soundly: the leaf does not commit `pk_hw`, so an in-circuit hardware clause would quantify over a free witness any adversary can supply, and anchoring it properly means either changing the leaf's arity (a protocol-version event, proposal 0028) or pinning binding evidence per leaf at the operator — which names the migrating credential in the act. Hardware's contribution here is custody instead: where wrapping is in force (§9.2), producing this certificate requires unwrapping `sk_root` behind a user-presence check on the old device. What an extracted `sk_root` permits without that check is bounded — one successor per leaf, visible to the displaced member, revocable by quorum — and stated in §15.
 
 The migration is verified (ideally itself wrapped in a ZK proof rather than transmitted with `pk_root_old` in the clear, consistent with this design's general avoidance of exposing linkable identifiers) against the old, still-valid leaf. On success, the credential's standing carries over: the successor leaf enters the class the consumed leaf occupied (its tier, §5.1), and the lineage key `sk_cred` carries with it (below) — numeric attributes, when a later version adds them (proposal 0028), carry here too. The old leaf is consumed via a migration-specific nullifier, preventing a still-live old key from being used to spawn more than one successor credential.
 
@@ -973,7 +991,7 @@ Whoever operates a given agora's Skiora — self-hosted by the group, or a chose
 - **Content**: Authored content carries unlinkable, message-bound attestations proving "a real group member stands behind this" externally, while richer authorship and reliability tracking remains a member-only concept — and standing is enforced at the moment of every action (§9.1, §11) rather than being queryable per past attestation.
 - **Governance**: Agoras mutate admission policy and thresholds at will via quorum, and can be permanently dissolved — verifiably, through irreversible multi-party key destruction, once MPC custody lands (§4.4, not yet implemented); procedurally, with best-effort destruction and the log's terminal entry, until then (§12).
 - **Live authentication**: Two or more members actively communicating — over a network channel or in person — can mutually confirm, in real time, that everyone present holds a genuine, currently-valid credential and actually possesses its secret key, using a jointly-derived, replay-resistant session context and, for in-person settings, a human-verified short authentication string in place of network-channel binding.
-- **Key custody and continuity**: A root/epoch key hierarchy bounds the damage of routine compromise to a single epoch, hardware-backed authenticators protect the rarely-used root key against silent extraction, and dual migration/re-vouching paths let a member change devices with or without preserving reputation continuity, depending on whether their prior device remains reachable.
+- **Key custody and continuity**: A three-tier key hierarchy bounds the damage of routine compromise to a single epoch; a hardware anchor binds each credential to its device and wraps the rarely-used protocol root wherever the platform allows; and dual migration/re-vouching paths let a member change devices with or without preserving reputation continuity, depending on whether their prior device remains reachable.
 - **Integrity and auditability**: An optional per-agora append-only transparency log lets any independent outside party verify the machinery is run honestly — non-equivocation, append-only integrity, and protocol conformance — without any membership or identity access. Detection of a rogue *client's* misbehaviour is deferred with §10.2 (proposal 0010).
 - **Multi-agora membership**: One Persora may hold credentials in any number of agoras, each a separate cryptographic domain sharing no key material and no derived value, so that no agora — and no observer — learns that a member belongs to any other.
 

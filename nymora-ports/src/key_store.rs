@@ -9,14 +9,17 @@
 //!
 //! # Why the authority is abstract
 //!
-//! Nothing above this trait learns how many keys implement it. A Secure Enclave key, a
-//! StrongBox key, a FIDO2 authenticator, a key in a file, or the two-level arrangement of
-//! proposal 0001 all present the same surface: a public key that goes in the accumulator leaf,
-//! an optional binding a verifier can check, and two signing operations.
+//! Nothing above this trait learns how many keys implement it. The specified construction is
+//! two-level (§9.1, §9.2; proposal 0001 as applied by 0031): a capable backend keeps a
+//! hardware anchor `sk_hw` and, wrapped under it where the platform allows, the
+//! proving-native protocol root that actually signs — yet a key in a file presents the same
+//! surface: a public key that goes in the accumulator leaf, an optional binding a verifier
+//! can check, and two signing operations.
 //!
-//! That is what keeps 0001 off the critical path. If it is adopted, the second key and its
-//! `binding_cert` live entirely inside an implementation, and [`RootBinding`](self) carries the
-//! certificate as bytes this crate never parses.
+//! That surface predates the two-level decision and survives it unchanged, which is what
+//! kept 0001 off the critical path while its measurement waited: the anchor and its binding
+//! evidence live entirely inside an implementation, carried here only as bytes this crate
+//! never parses.
 
 pub use nymora_core::{EpochCertPayload, MigrationCertPayload};
 
@@ -116,11 +119,11 @@ pub trait KeyStore {
     /// What this backend can do. See [`Capabilities`] for why it is reported and not assumed.
     fn capabilities(&self) -> Capabilities;
 
-    /// Creates a credential's root key for one agora.
+    /// Creates a credential's root material for one agora.
     ///
     /// The returned public key is what the accumulator leaf commits to (§9.1). The binding, if
-    /// present, is opaque to everything above this trait — a hardware attestation, 0001's
-    /// `binding_cert`, or nothing at all.
+    /// present, is opaque to everything above this trait — the hardware anchor's evidence for
+    /// the fresh root (§9.2, proposal 0031), or nothing at all where no hardware attests.
     ///
     /// # Errors
     ///

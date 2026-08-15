@@ -17,8 +17,8 @@
 //! being consumed rather than used, and a certificate signed by the *old* root over the
 //! *new* one. §6.5's uniform-shape requirement targets externally published bundles, and a
 //! migration proof travels member-to-Skiora and never further, so §6.5's fingerprinting
-//! concern does not reach it — the member-to-Skiora reasoning proposal 0001 records for
-//! the root construction. Folding it into [`Action`] would force
+//! concern does not reach it — the scope rule §6.5 states (proposals 0001, 0031).
+//! Folding it into [`Action`] would force
 //! every routine proof to carry migration's structure or the circuit to hide it, for no
 //! property in return.
 //!

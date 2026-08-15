@@ -1,6 +1,6 @@
 # Proposal 0001 — Two-level root key
 
-**Status:** Proposed — deferred until the circuit is implemented
+**Status:** **Applied** — 2026-08-15, as adapted by [proposal 0031](0031-the-committed-root-is-proving-native.md), on the constraint measurement this proposal's deferral asked for: embedded-curve verification 6,238 constraints against 2,541,739 for non-native P-256 measured in its most favorable configuration (407×; `measure/`). The decision rule below fired; 0031 records the mapping onto the specification as it stands, including the one adaptation (migration certificates remain with the protocol root).
 **Affects:** §9.1, §9.2, §9.3, §6.5, §15
 **Supersedes:** nothing
 **Split:** the `r_root` correction originally bundled here was extracted to

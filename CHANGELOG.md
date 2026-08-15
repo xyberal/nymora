@@ -6,6 +6,23 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **The two-level root key, applied** (§6.5, §9.1, §9.2, §9.3, §14, §15; proposal 0001,
+  applied as adapted by proposal 0031). The measurement its deferral asked for came back
+  407× — so the accumulator-committed root is proving-system-native, and the hardware
+  key becomes the credential's anchor: `sk_hw` binds the credential to its device at
+  creation, wraps `sk_root` at rest where the platform can, gates its use behind user
+  presence, and is never verified inside the standardized circuit. One adaptation is
+  argued rather than inherited: migration certificates stay with the protocol root,
+  because the anonymous migration statement verifies its certificate against the key
+  the consumed leaf commits, and a hardware clause would either quantify over a free
+  witness, change the leaf's arity (a protocol-version event, proposal 0028), or pin
+  bindings that name the migrating credential. §15 states plainly what an extracted
+  root permits — indefinite epoch certification and at most one hijacked successor per
+  leaf, visible to the displaced member and revocable by quorum. §6.5 now carries the
+  scope rule the migration statement already stood on: uniform shape binds externally
+  published bundles, not member-to-operator proofs. No wire format, statement, vector,
+  or state machine changes — the key-store port was built one level below this
+  decision, and its documentation now says "is" where it said "if".
 - **The constraint measurement the deferred decisions asked for** (`measure/`;
   proposals 0001 and 0030). A standalone, deterministic harness — outside the library
   workspace, its lockfile committed — measures R1CS constraint counts for the three
