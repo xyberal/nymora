@@ -24,7 +24,9 @@
 //! two implementations cannot disagree about where one absorbed field ends and the next
 //! begins.
 //!
-//! Until the proving system is chosen, the algebraic family is a documented stand-in behind
+//! The proving system is chosen — Plonkish KZG over BLS12-381, with Poseidon as the
+//! algebraic hash (§6.5, proposal 0033) — but until the real circuit lands, the algebraic
+//! family remains a documented stand-in behind
 //! the `provisional-algebraic-hash` feature, on by default; see [`algebraic`] for what that
 //! means and what it would cost to ship. The root-authority signature scheme sits on the
 //! same fault line — both certificates are verified inside the circuit (§9.1, §9.3) — and

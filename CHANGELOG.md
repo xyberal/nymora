@@ -6,17 +6,25 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
-- **The proving-system proposal, and the measurement moved to its field** (proposal
-  0033, Proposed — nothing normative yet). The proposal selects Plonkish KZG over
-  BLS12-381 under an inherited universal setup, with Poseidon as the circuit hash and
-  EdDSA over Jubjub as the certificate scheme; per-circuit ceremonies are rejected on
-  the argument that a protocol whose forgeries are invisible by design should not
-  accumulate per-revision trust events, and the curve is chosen on lifetime margin,
-  since the field hardens into a re-keying event at first deployment. In support, the
-  `measure/` harness was re-run over the BLS12-381 scalar field: identical counts
-  everywhere except the embedded signature (6,238 → 6,227; Jubjub versus Baby
-  Jubjub), decision ratio 408×. The decisions taken on the original run (proposals
-  0031, 0032) stand confirmed on the field the proposal names.
+- **The proving system is chosen** (§5.2, §6.5, §9.1, §15; proposal 0033, applied).
+  Plonkish KZG over BLS12-381 under a universal reference string inherited from an
+  existing large ceremony — never a setup of this protocol's own — with Poseidon over
+  the BLS12-381 scalar field as the circuit hash and EdDSA over Jubjub as the
+  certificate scheme, closing proposal 0031's last open question. Per-circuit
+  ceremonies are rejected on the argument that a protocol whose forgeries are
+  invisible by design should not accumulate per-revision trust events; the curve is
+  chosen on lifetime margin, because the field hardens into a re-keying event the
+  moment real credentials exist. §6.5 names the system where it said "e.g.,
+  Groth16/PLONK"; §5.2 and §9.1 name the hash and scheme where they said "fixed with
+  the proving system"; §15 gains the margin entry — forward-only forgery versus a
+  statistically private archive, the blinding obligation, and the pre-non-draft
+  checkpoint with its early trigger. In support, the `measure/` harness was re-run
+  over the BLS12-381 scalar field: identical counts everywhere except the embedded
+  signature (6,238 → 6,227; Jubjub versus Baby Jubjub), decision ratio 408×, so the
+  decisions taken on the original run (proposals 0031, 0032) stand confirmed on the
+  field the protocol now names. The provisional hash and signature remain the
+  stand-ins until the real circuit lands; no mechanism, wire format, or vector
+  changes.
 - **The depth constant is 32** (§5.2; proposal 0032, applied). Proposal 0030 settled
   who chooses the accumulator depth (no one — it is a network-wide constant); the
   measurement it deferred to now prices the value, and the asymmetry decides it: a

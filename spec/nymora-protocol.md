@@ -215,7 +215,7 @@ The standardized circuit (§6.5) is deliberately shared across agoras; sharing a
 
 ### 5.2 Accumulators
 
-Each policy class (e.g., "Tier2 members," "Tier2-eligible vouchers") has its own Merkle accumulator, publishing only a root hash — and only to members. **The current epoch's roots have no lookup endpoint at all** (proposal 0025): they reach members exclusively in the boundary broadcast (§11), and historical roots are served under §7's access grant:
+Each policy class (e.g., "Tier2 members," "Tier2-eligible vouchers") has its own Merkle accumulator — over Poseidon on the BLS12-381 scalar field, the circuit's hash (§6.5, proposal 0033) — publishing only a root hash, and only to members. **The current epoch's roots have no lookup endpoint at all** (proposal 0025): they reach members exclusively in the boundary broadcast (§11), and historical roots are served under §7's access grant:
 
 ```
 Current-epoch roots: delivered in the boundary broadcast (§11) — nothing to query.
@@ -378,7 +378,7 @@ Because tag keys are broadcast per epoch, ceasing to broadcast takes effect at t
 
 ### 6.5 The `attestation_proof` object
 
-A fixed-shape, non-interactive zero-knowledge proof (e.g., Groth16/PLONK), using **one standardized circuit shared across every agora** — deliberately, so that proof size and structure never vary by agora, preventing proof-shape fingerprinting from correlating content back to a specific group. The accumulator depth the membership path quantifies over is part of that shape, and is therefore a network-wide protocol constant (§5.2, proposal 0030).
+A fixed-shape, non-interactive zero-knowledge proof under the protocol's standardized proving system — **Plonkish arithmetization with KZG polynomial commitments over the BLS12-381 pairing curve**, under a universal updatable reference string inherited from an existing large ceremony rather than a setup of this protocol's own (proposal 0033) — using **one standardized circuit shared across every agora** — deliberately, so that proof size and structure never vary by agora, preventing proof-shape fingerprinting from correlating content back to a specific group. The proving field fixes the primitives with it: every `Hash(...)` a statement computes is **Poseidon over the BLS12-381 scalar field**, and the certificate scheme the chain verifies is **EdDSA over Jubjub with a Poseidon transcript** (§9.1). The accumulator depth the membership path quantifies over is part of that shape, and is therefore a network-wide protocol constant (§5.2, proposal 0030).
 
 ```
 Statement proven: the full membership chain of §9.1, against Root_{policy_class}.
@@ -599,14 +599,14 @@ sk_hw     — the hardware anchor: generated inside a hardware authenticator whe
             platform provides one, non-exportable; binds the credential to its device
             at creation and protects sk_root's storage (§9.2); never verified inside
             the standardized circuit
-sk_root   — the protocol root: proving-system-native, committed (via its public
-            counterpart) in the agora's accumulator; signs the epoch and migration
-            certificates; used rarely
+sk_root   — the protocol root: proving-system-native (a Jubjub EdDSA key, §6.5),
+            committed (via its public counterpart) in the agora's accumulator; signs
+            the epoch and migration certificates; used rarely
 sk_epoch  — freshly generated each epoch and certified by sk_root; used for routine,
             day-to-day operations
 ```
 
-**Why the committed root is proving-system-native rather than a hardware key** (proposal 0001, applied by 0031). The epoch certificate is verified inside the standardized circuit on every routine proof, and a signature the circuit checks cheaply must be native to the proving field. Hardware authenticators sign only with curves foreign to any practical proving field, and the difference is measured, not estimated: an embedded-curve verification adds 6,238 constraints to the statement core, non-native P-256 ECDSA adds 2,541,739 — 407×, measured with every choice favoring the hardware curve (the `measure/` harness; reproducible). Committing a hardware key would impose that cost on every post, vouch, corroboration, and live-authentication handshake, paid by the member's own device. Separating a hardware anchor that signs nothing the circuit sees from a proving-native root the circuit verifies cheaply confines hardware to what it is for — custody — while still binding the credential to real hardware at creation (§9.2).
+**Why the committed root is proving-system-native rather than a hardware key** (proposal 0001, applied by 0031). The epoch certificate is verified inside the standardized circuit on every routine proof, and a signature the circuit checks cheaply must be native to the proving field. Hardware authenticators sign only with curves foreign to any practical proving field, and the difference is measured, not estimated: an embedded-curve verification adds 6,227 constraints to the statement core, non-native P-256 ECDSA adds 2,541,739 — 408×, measured on the BLS12-381 scalar field the proving system fixes (proposal 0033), with every choice favoring the hardware curve (the `measure/` harness; reproducible). Committing a hardware key would impose that cost on every post, vouch, corroboration, and live-authentication handshake, paid by the member's own device. Separating a hardware anchor that signs nothing the circuit sees from a proving-native root the circuit verifies cheaply confines hardware to what it is for — custody — while still binding the credential to real hardware at creation (§9.2).
 
 The accumulator leaf commits to `pk_root` (a public verification key derived from `sk_root`) and to `sk_cred` (below), using an opening value `r_root` fixed once at credential creation, and is bound to the agora it belongs to:
 
@@ -666,9 +666,9 @@ Every ordinary proof — authoring content, vouching, policy approval, live auth
 
 Both `sk_cred` and `r_root` appear as witnesses because the leaf commits to both (above); a statement naming only `r_root` cannot open it.
 
-The correspondence clause is stated rather than left to the reader, because omitting it disconnects the certificate from the key that acts: with `sk_epoch` and `pk_epoch` as independent witnesses, the certificate would prove the root certified *some* key while the nullifier derived from an arbitrary, never-certified one — making certification decorative for exactly the operations it exists to authorize. What "public counterpart" means concretely is the signature scheme's key derivation, fixed with the proving system (§6.5).
+The correspondence clause is stated rather than left to the reader, because omitting it disconnects the certificate from the key that acts: with `sk_epoch` and `pk_epoch` as independent witnesses, the certificate would prove the root certified *some* key while the nullifier derived from an arbitrary, never-certified one — making certification decorative for exactly the operations it exists to authorize. What "public counterpart" means concretely is the signature scheme's key derivation — EdDSA over Jubjub, the certificate scheme the proving system fixes (§6.5, proposal 0033).
 
-The revocation-set root and migration-spend root are public inputs alongside the accumulator root; a verifier accepts a routine proof only against the current epoch's three roots. Both sets are keyed accumulators supporting non-membership witnesses — a structure distinct from the positional accumulator of §5.2, fixed with the proving system (§6.5). The two non-membership clauses are what make §5.2's definition of a current credential a proven fact rather than a verifier's unaided obligation.
+The revocation-set root and migration-spend root are public inputs alongside the accumulator root; a verifier accepts a routine proof only against the current epoch's three roots. Both sets are keyed accumulators supporting non-membership witnesses — a structure distinct from the positional accumulator of §5.2, built over the same Poseidon hash (§6.5, proposal 0033). The two non-membership clauses are what make §5.2's definition of a current credential a proven fact rather than a verifier's unaided obligation.
 
 **Only the last line varies by action, and it is where the key choice above takes effect.** Authorship (§6.1) derives its nullifier from the epoch key — `Hash(sk_epoch, message_hash, agora_id)` — so that attribution expires with that key. Vouching (§5.3), policy approval (§4.3), and migration (§9.3) derive theirs from `sk_cred` over the identifier of the session, proposal, or leaf they consume, because each is a count and a count cannot rest on a key the member can mint twice. Live authentication (§8) posts a pseudonym rather than a nullifier, derived as §8.1 specifies.
 

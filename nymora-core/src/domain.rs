@@ -76,7 +76,8 @@ domains! {
     ///
     /// The revocation set and the migration-spend set are keyed accumulators supporting
     /// non-membership witnesses — normative in §9.1's currency clauses, though the tree
-    /// structure computing them is fixed with the proving system and currently provisional.
+    /// structure computing them is provisional until the real circuit lands (its hash is
+    /// the Poseidon instance of §6.5, proposal 0033).
     /// The tags name the *context*, which survives whatever structure arrives. Distinct from
     /// [`Domain::AccumulatorLeaf`] for the same substitution reasons, and additionally so a
     /// membership path and a non-membership path can never be confused for each other.

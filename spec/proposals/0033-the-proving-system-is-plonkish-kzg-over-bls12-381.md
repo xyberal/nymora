@@ -1,6 +1,6 @@
 # Proposal 0033 — The proving system is Plonkish KZG over BLS12-381
 
-**Status:** **Proposed** — nothing below is normative until this proposal is applied
+**Status:** **Applied** — the sections below are now normative in the specification
 **Affects:** §5.2, §6.5, §9.1, §15
 **Builds on:** [proposal 0031](0031-the-committed-root-is-proving-native.md) (the
 committed root is proving-native, so the certificate scheme is fixed with the proving
