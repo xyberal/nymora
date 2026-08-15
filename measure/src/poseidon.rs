@@ -3,11 +3,11 @@
 //! One Poseidon instance for every algebraic hash in the measurement.
 //!
 //! The counts, not the parameters, are the product here: any secure Poseidon over the
-//! BN254 scalar field with t = 3 (rate 2), alpha = 5, 8 full and 57 partial rounds has
-//! the same constraint shape, so the standard configuration stands in for whichever
+//! BLS12-381 scalar field with t = 3 (rate 2), alpha = 5, 8 full and 57 partial rounds
+//! has the same constraint shape, so the standard configuration stands in for whichever
 //! instance the real circuit standardizes on.
 
-use ark_bn254::Fr;
+use ark_bls12_381::Fr;
 use ark_crypto_primitives::sponge::constraints::CryptographicSpongeVar;
 use ark_crypto_primitives::sponge::poseidon::constraints::PoseidonSpongeVar;
 use ark_crypto_primitives::sponge::poseidon::{

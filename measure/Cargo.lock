@@ -15,13 +15,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "ark-bn254"
+name = "ark-bls12-381"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a22f4561524cd949590d78d7d4c5df8f592430d221f7f3c9497bbafd8972120f"
+checksum = "c775f0d12169cba7aae4caeb547bb6a50781c7449a8aa53793827c9ec4abf488"
 dependencies = [
  "ark-ec",
  "ark-ff",
+ "ark-serialize",
  "ark-std",
 ]
 
@@ -63,12 +64,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "ark-ed-on-bn254"
+name = "ark-ed-on-bls12-381"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71892f265d01650e34988a546b37ea1d2ba1da162a639597a03d1550f26004d8"
+checksum = "ba6d678bb98a7e4f825bd4e332e93ac4f5a114ce2e3340dee4d7dc1c7ab5b323"
 dependencies = [
- "ark-bn254",
+ "ark-bls12-381",
  "ark-ec",
  "ark-ff",
  "ark-r1cs-std",
@@ -358,10 +359,10 @@ dependencies = [
 name = "nymora-measure"
 version = "0.0.0"
 dependencies = [
- "ark-bn254",
+ "ark-bls12-381",
  "ark-crypto-primitives",
  "ark-ec",
- "ark-ed-on-bn254",
+ "ark-ed-on-bls12-381",
  "ark-ff",
  "ark-r1cs-std",
  "ark-relations",

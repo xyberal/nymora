@@ -7,7 +7,7 @@
 //! circuits here take the hash as the unit of cost, so the depth sensitivity this module
 //! measures is what prices proposal 0030's deferred constant.
 
-use ark_bn254::Fr;
+use ark_bls12_381::Fr;
 use ark_crypto_primitives::sponge::poseidon::PoseidonConfig;
 use ark_ff::UniformRand;
 use ark_r1cs_std::alloc::AllocVar;

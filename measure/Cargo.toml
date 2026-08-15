@@ -20,8 +20,8 @@ ark-std = { version = "0.4", default-features = false }
 ark-relations = { version = "0.4", default-features = false }
 ark-r1cs-std = { version = "0.4", default-features = false }
 ark-crypto-primitives = { version = "0.4", default-features = false, features = ["sponge", "r1cs"] }
-ark-bn254 = { version = "0.4", default-features = false, features = ["curve"] }
-ark-ed-on-bn254 = { version = "0.4", default-features = false, features = ["r1cs"] }
+ark-bls12-381 = { version = "0.4", default-features = false, features = ["curve"] }
+ark-ed-on-bls12-381 = { version = "0.4", default-features = false, features = ["r1cs"] }
 ark-secp256r1 = { version = "0.4", default-features = false }
 
 [profile.release]

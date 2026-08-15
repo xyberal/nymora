@@ -27,14 +27,15 @@ any count.
 
 ## What is measured
 
-R1CS constraints over the BN254 scalar field (arkworks 0.4, constraint-count
-optimization goal). Counts, not proving times, because counts are platform-independent
-and the *ratio* carries the decision. Three cumulative configurations:
+R1CS constraints over the BLS12-381 scalar field — the field proposal 0033 selects
+(arkworks 0.4, constraint-count optimization goal). Counts, not proving times, because
+counts are platform-independent and the *ratio* carries the decision. Three cumulative
+configurations:
 
 | | configuration | contents |
 |---|---|---|
 | (a) | statement core | Merkle inclusion (Poseidon, depth 32) + nullifier derivation |
-| (b) | embedded signature | (a) + Schnorr over a curve embedded in the field (Baby Jubjub) |
+| (b) | embedded signature | (a) + Schnorr over a curve embedded in the field (Jubjub) |
 | (c) | in-circuit P-256 | (a) + non-native ECDSA over P-256 |
 
 Configuration (c) is favored at every choice point, so that its count is a floor for
@@ -56,17 +57,23 @@ The one unavoidable real-deployment cost that is charged to (c): the public key 
 witness (it lives inside the credential chain, never in public inputs), so curve
 membership of the witnessed key is enforced.
 
-## Results — 2026-08-15
+## Results — 2026-08-15, BLS12-381 scalar field
+
+The measurement was first taken over the BN254 scalar field (same day; in this file's
+git history) and re-run on BLS12-381 when proposal 0033 selected it. As the field-size
+argument predicts, the counts are identical except the embedded signature, which
+shifted by 11 constraints (6,238 → 6,227; Jubjub's scalar bit-length versus Baby
+Jubjub's). Every decision taken on the original numbers stands unchanged.
 
 ```
 == unit costs ==
   poseidon 2-to-1 hash                                  241
-  one non-native mul (P-256 base over BN254)           1266
+  one non-native mul (P-256 base over BLS12-381)       1266
 
 == components ==
   merkle inclusion, depth 32                           7777
   nullifier derivation                                  484
-  embedded-curve schnorr verify                        6238
+  embedded-curve schnorr verify                        6227
   non-native P-256 ECDSA verify                     2541739
       ecdsa/scalars u1, u2 (mod n)                     2872
       ecdsa/scalar bit decomposition                   1866
@@ -77,7 +84,7 @@ membership of the witnessed key is enforced.
 
 == configurations ==
   (a) merkle-32 + nullifier                            8261
-  (b) (a) + embedded-curve signature                  14499
+  (b) (a) + embedded-curve signature                  14488
   (c) (a) + non-native P-256 ECDSA                  2550000
 
 == merkle depth sensitivity ==
@@ -88,7 +95,7 @@ membership of the witnessed key is enforced.
 ## Reading the numbers
 
 **Proposal 0001 — the ratio is two orders of magnitude, conclusive.** The signature
-increment is 6,238 constraints embedded versus 2,541,739 non-native: **407×**
+increment is 6,227 constraints embedded versus 2,541,739 non-native: **408×**
 (configuration ratio 176×). The rule asked for one order of magnitude in a
 configuration favoring P-256; the result is two. Independent R1CS implementations of
 non-native ECDSA report the same order (≈1.5M constraints), so this is the design

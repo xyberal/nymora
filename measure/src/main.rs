@@ -13,8 +13,10 @@
 //!
 //! Proposal 0001's decision rule reads the (c)-versus-(b) ratio; the Merkle depth table
 //! prices the network-wide constant proposal 0030 defers. Counts are R1CS constraints
-//! over the BN254 scalar field with the constraint-count optimization goal — the
-//! platform-independent measure; ratios, not absolute numbers, carry the decision.
+//! over the BLS12-381 scalar field (the field proposal 0033 selects; the original run
+//! over BN254 is in this file's history, within noise of these numbers) with the
+//! constraint-count optimization goal — the platform-independent measure; ratios, not
+//! absolute numbers, carry the decision.
 //!
 //! Deterministic by construction (`ark_std::test_rng`): every run reproduces the
 //! numbers in README.md. `MEASURE_SKIP_SAT=1` skips the satisfiability replay, which
@@ -25,7 +27,7 @@ mod merkle;
 mod poseidon;
 mod schnorr;
 
-use ark_bn254::Fr;
+use ark_bls12_381::Fr;
 use ark_ff::UniformRand;
 use ark_r1cs_std::alloc::AllocVar;
 use ark_r1cs_std::eq::EqGadget;
@@ -63,7 +65,7 @@ fn main() {
     let cfg = poseidon::config();
     let mut rng = test_rng();
 
-    println!("constraint measurement — R1CS over the BN254 scalar field");
+    println!("constraint measurement — R1CS over the BLS12-381 scalar field");
     println!("(counts optimized for constraints; satisfiability {})", {
         if check_sat {
             "checked"
@@ -83,7 +85,7 @@ fn main() {
         poseidon::hash_var(cs, &cfg, &[a_v, b_v])?.enforce_equal(&h_in)
     });
     measure(
-        "one non-native mul (P-256 base over BN254)",
+        "one non-native mul (P-256 base over BLS12-381)",
         check_sat,
         |cs| {
             use ark_secp256r1::Fq as FqP;

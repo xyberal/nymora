@@ -2,7 +2,7 @@
 
 //! Configuration (b)'s increment: an embedded-curve Schnorr verification.
 //!
-//! Baby Jubjub is embedded in the BN254 scalar field, so both scalar multiplications run
+//! Jubjub is embedded in the BLS12-381 scalar field, so both scalar multiplications run
 //! on native field arithmetic and the challenge hash is the same Poseidon as everywhere
 //! else. This is the shape the epoch certificate check (§9.1) takes if proposal 0001 is
 //! applied and the in-circuit key is an embedded-curve key.
@@ -12,11 +12,11 @@
 //! fixed-base windows for `s·G`. Overcounting (b) only shrinks the (c)/(b) ratio the
 //! decision rule looks at, so it cannot manufacture the conclusion.
 
-use ark_bn254::Fr;
+use ark_bls12_381::Fr;
 use ark_crypto_primitives::sponge::poseidon::PoseidonConfig;
 use ark_ec::{CurveGroup, Group};
-use ark_ed_on_bn254::constraints::EdwardsVar;
-use ark_ed_on_bn254::{EdwardsProjective, Fr as EdFr};
+use ark_ed_on_bls12_381::constraints::EdwardsVar;
+use ark_ed_on_bls12_381::{EdwardsProjective, Fr as EdFr};
 use ark_ff::{BigInteger, PrimeField, UniformRand};
 use ark_r1cs_std::alloc::AllocVar;
 use ark_r1cs_std::boolean::Boolean;

@@ -24,7 +24,7 @@
 //! subtracted at the end — the standard trick to keep the incomplete formulas away from
 //! the point at infinity.
 
-use ark_bn254::Fr;
+use ark_bls12_381::Fr;
 use ark_ec::short_weierstrass::SWCurveConfig;
 use ark_ec::{AffineRepr, CurveGroup, Group};
 use ark_ff::{BigInteger, Field, PrimeField, UniformRand};
