@@ -6,6 +6,18 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **The constraint measurement the deferred decisions asked for** (`measure/`;
+  proposals 0001 and 0030). A standalone, deterministic harness — outside the library
+  workspace, its lockfile committed — measures R1CS constraint counts for the three
+  configurations proposal 0001's decision rule reads: the statement core (Merkle
+  inclusion plus nullifier, 8,261 constraints at depth 32), plus an embedded-curve
+  Schnorr verification (increment 6,238), plus non-native P-256 ECDSA measured in the
+  configuration most favorable to it (increment 2,541,739). The ratio is 407× — two
+  orders of magnitude where the rule asked for one, so the result is conclusive: the
+  two-level root key of proposal 0001 is the design, pending its formal application to
+  §9. The depth table prices proposal 0030's constant at a flat 243 constraints per
+  level, which argues for fixing it generously. Methodology, results, and what was
+  deliberately not measured are recorded in `measure/README.md`.
 - **Accumulator depth is a protocol constant** (§5.2, §6.5; proposal 0030, applied).
   The specification told founders to size depth per agora at creation while the circuit
   layer held that one value is fixed network-wide; the layers now agree, on the side the

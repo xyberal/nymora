@@ -15,7 +15,7 @@ while IFS= read -r -d '' f; do
         echo "missing SPDX header: $f"
         missing=1
     fi
-done < <(find . -name '*.rs' -not -path './target/*' -print0)
+done < <(find . -name '*.rs' -not -path '*/target/*' -print0)
 
 if [ "$missing" -ne 0 ]; then
     echo "license-header check FAILED"

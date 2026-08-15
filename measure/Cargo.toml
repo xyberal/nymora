@@ -1,0 +1,28 @@
+# The constraint-measurement harness: R1CS counts for the configurations that decide
+# proposal 0001 (in-circuit P-256 versus an embedded-curve signature) and price the
+# depth constant proposal 0030 defers. Standalone by design — see README.md.
+[package]
+name = "nymora-measure"
+version = "0.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/xyberal/nymora"
+publish = false
+
+# Deliberately its own workspace: the library workspace must not inherit these
+# dependencies, and this crate must not inherit the library's lints or profiles.
+[workspace]
+
+[dependencies]
+ark-ff = { version = "0.4", default-features = false }
+ark-ec = { version = "0.4", default-features = false }
+ark-std = { version = "0.4", default-features = false }
+ark-relations = { version = "0.4", default-features = false }
+ark-r1cs-std = { version = "0.4", default-features = false }
+ark-crypto-primitives = { version = "0.4", default-features = false, features = ["sponge", "r1cs"] }
+ark-bn254 = { version = "0.4", default-features = false, features = ["curve"] }
+ark-ed-on-bn254 = { version = "0.4", default-features = false, features = ["r1cs"] }
+ark-secp256r1 = { version = "0.4", default-features = false }
+
+[profile.release]
+debug = false

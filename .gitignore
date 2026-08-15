@@ -1,7 +1,10 @@
 # Build output
 /target/
+/measure/target/
 
 # This is a library workspace, so the lockfile is not committed.
+# The measurement harness commits its lockfile: pinned dependencies are part of
+# reproducing the numbers its README records.
 /Cargo.lock
 
 # Local environment

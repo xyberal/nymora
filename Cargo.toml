@@ -2,6 +2,10 @@
 # See ARCHITECTURE.md for the crate graph and the pure-engine-plus-ports model.
 [workspace]
 resolver = "2"
+# `measure/` is a standalone harness with heavy proving-system dependencies; it stays
+# outside the workspace so the library CI, the no_std discipline, and build times are
+# untouched. It is built and run on demand — see measure/README.md.
+exclude = ["measure"]
 members = [
     "nymora-core",
     "nymora-crypto",
