@@ -13,11 +13,10 @@ use nymora_core::ProtocolError;
 
 /// A proving system for the two Nymora statements.
 ///
-/// `DEPTH` is the accumulator depth the statements quantify over. The real circuit fixes
-/// one value network-wide — a per-agora depth would be a per-agora proof shape, the §6.5
-/// fingerprinting vector; proposal 0030 makes the constant's scope normative — but the
-/// trait carries it generically so that tests exercise small trees and the eventual pin
-/// is one line.
+/// `DEPTH` is the accumulator depth the statements quantify over. The network-wide value
+/// is [`PROTOCOL_DEPTH`](crate::PROTOCOL_DEPTH) — a per-agora depth would be a per-agora
+/// proof shape, the §6.5 fingerprinting vector; proposal 0030 fixed the scope and 0032
+/// the value — but the trait carries it generically so that tests exercise small trees.
 ///
 /// # Soundness at both ends
 ///

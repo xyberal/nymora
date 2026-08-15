@@ -17,6 +17,15 @@
 
 #![no_std]
 
+/// The network-wide accumulator depth (§5.2; proposals 0030, 0032).
+///
+/// One value for every class in every agora, because the membership path lives inside
+/// the one standardized circuit and its length is part of the proof shape §6.5 keeps
+/// uniform. This constant binds deployments and the real circuit; the `DEPTH` const
+/// generics running through the crates stay, so tests and conformance vectors continue
+/// to exercise the algebra on small trees.
+pub const PROTOCOL_DEPTH: usize = 32;
+
 #[cfg(feature = "provisional-algebraic-hash")]
 pub mod statement;
 #[cfg(feature = "stub-prover")]

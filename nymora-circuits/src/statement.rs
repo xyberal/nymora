@@ -41,9 +41,9 @@ use nymora_core::{
 /// not open. The migration-spend key is likewise derived, not supplied.
 ///
 /// `DEPTH` is the accumulator depth the leaf witness is cut for. It is a const parameter
-/// here because the tree structures carry it; the real circuit fixes one value
-/// network-wide, since a per-agora depth would be a per-agora proof shape (§6.5,
-/// proposal 0030).
+/// here because the tree structures carry it; the network-wide value is
+/// [`PROTOCOL_DEPTH`](crate::PROTOCOL_DEPTH), since a per-agora depth would be a
+/// per-agora proof shape (§6.5; proposals 0030, 0032).
 pub struct ChainWitness<'a, const DEPTH: usize> {
     /// `sk_epoch` — the acting key (§9.1).
     pub epoch_key: &'a EpochSecretKey,

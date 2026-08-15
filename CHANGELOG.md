@@ -6,6 +6,15 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **The depth constant is 32** (§5.2; proposal 0032, applied). Proposal 0030 settled
+  who chooses the accumulator depth (no one — it is a network-wide constant); the
+  measurement it deferred to now prices the value, and the asymmetry decides it: a
+  shallower tree saves a modest, linear, per-proof cost (243 constraints per level)
+  against a terminal, unbounded, per-class risk, and the window in which the value is
+  free to pin closes when the first real proof circulates and the depth becomes part
+  of the standardized shape. `nymora-circuits` gains the promised one-line pin
+  (`PROTOCOL_DEPTH = 32`); the const generics stay, so tests and vectors keep
+  exercising small trees.
 - **The two-level root key, applied** (§6.5, §9.1, §9.2, §9.3, §14, §15; proposal 0001,
   applied as adapted by proposal 0031). The measurement its deferral asked for came back
   407× — so the accumulator-committed root is proving-system-native, and the hardware

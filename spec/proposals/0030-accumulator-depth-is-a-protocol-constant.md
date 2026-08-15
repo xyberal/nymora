@@ -1,6 +1,6 @@
 # Proposal 0030 — Accumulator depth is a protocol constant
 
-**Status:** **Applied** — the sections below are now normative in the specification
+**Status:** **Applied** — the sections below are now normative in the specification; the deferred value was subsequently pinned at 32 by [proposal 0032](0032-the-depth-constant-is-thirty-two.md)
 **Affects:** §5.2, §6.5
 **Supersedes:** nothing
 
