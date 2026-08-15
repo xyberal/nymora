@@ -6,6 +6,13 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **A contributor's guide.** `CONTRIBUTING.md` states the three load-bearing
+  conventions up front — normative changes start as proposals, a mechanism change is
+  one commit touching spec, code, and vectors, section numbers are never renumbered —
+  names adversarial reading of the specification as the most valuable contribution,
+  and explains how a pull request lands: `main` is append-only and produced by pushes
+  from the maintainers' tree of record, so accepted changes are applied there with the
+  contributor's authorship preserved and appear on `main` in the next push.
 - **A security policy, and the repository named.** `SECURITY.md` states the status
   plainly — pre-release, unaudited, provisional primitives; do not use this to protect
   anyone yet — and asks for private vulnerability reports, with specification-level
