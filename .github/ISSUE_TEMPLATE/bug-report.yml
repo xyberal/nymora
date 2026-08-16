@@ -1,0 +1,61 @@
+name: Bug report
+description: >-
+  The code does something wrong — it diverges from the specification it cites,
+  a test lies, a panic is reachable from untrusted input.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        **If what you found is exploitable, stop here.** Report it privately
+        through *Security → Report a vulnerability* instead — see
+        [SECURITY.md](../blob/main/SECURITY.md). Public issues are for defects
+        that do not hand anyone an attack.
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What the code does
+      description: >-
+        The observed behavior, concretely. A failing test case is the best
+        possible form of this.
+      placeholder: |
+        `Tree::witness(0)` on an empty tree returns …
+    validations:
+      required: true
+  - type: textarea
+    id: expectation
+    attributes:
+      label: What it should do, and on whose authority
+      description: >-
+        This project treats the specification as the source of truth, so the
+        strongest bug report cites it — a section (`§9.1`), a proposal number,
+        or a conformance vector the code disagrees with. If the expectation
+        comes from somewhere else (API contract, doc comment, common sense),
+        say where.
+      placeholder: |
+        §5.2 says the accumulator …, but the implementation …
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: How to reproduce it
+      description: >-
+        Commands from a clean checkout, or a test that fails. Include the
+        commit hash you were on (`git rev-parse HEAD`).
+      placeholder: |
+        On commit abc1234:
+        cargo test -p nymora-accumulator …
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: >-
+        Only if it plausibly matters — the workspace pins its toolchain in
+        `rust-toolchain.toml`, so most bugs reproduce everywhere.
+      placeholder: |
+        macOS 15 / aarch64, rustc 1.81.0
+    validations:
+      required: false

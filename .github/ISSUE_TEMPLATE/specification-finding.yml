@@ -1,0 +1,62 @@
+name: Specification finding
+description: >-
+  A mechanism in spec/ fails to deliver what it claims, an argument in a
+  proposal does not hold, or the specification is ambiguous where it must not
+  be. The contribution this project values most.
+labels: ["specification"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        **If the failure is exploitable — a way to actually break a guarantee
+        for someone using a conformant implementation — report it privately**
+        through *Security → Report a vulnerability*, not here. See
+        [SECURITY.md](../blob/main/SECURITY.md). This form is for design
+        findings that can be discussed in the open: gaps, ambiguities,
+        arguments that need repair before they are load-bearing.
+
+
+        Known limitations are documented in `spec/threat-model.md` §15
+        precisely so nobody has to rediscover them — worth a look before
+        filing.
+  - type: input
+    id: location
+    attributes:
+      label: Where
+      description: >-
+        Section numbers are stable identifiers here — cite them. A proposal
+        number works too.
+      placeholder: "§6.5; proposal 0034"
+    validations:
+      required: true
+  - type: textarea
+    id: claim
+    attributes:
+      label: What the specification claims
+      description: >-
+        The guarantee, mechanism, or argument as written — quoted or closely
+        paraphrased, so there is no doubt about which claim is under
+        examination.
+    validations:
+      required: true
+  - type: textarea
+    id: finding
+    attributes:
+      label: Why it does not hold
+      description: >-
+        The gap, counterexample, or unsupported step. Adversarial reading is
+        welcome: the strongest form is a concrete scenario in which the
+        mechanism fails to deliver what it promises.
+    validations:
+      required: true
+  - type: textarea
+    id: repair
+    attributes:
+      label: What repair might look like
+      description: >-
+        Optional. Normative changes land through proposals in
+        `spec/proposals/` (see CONTRIBUTING.md), so a sketch of the fix — or
+        of the alternatives and their costs — gives the eventual proposal a
+        head start.
+    validations:
+      required: false

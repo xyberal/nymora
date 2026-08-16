@@ -1,0 +1,7 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a vulnerability (private)
+    url: https://github.com/xyberal/nymora/security/advisories/new
+    about: >-
+      Anything you believe is exploitable goes through private vulnerability
+      reporting — never a public issue. See SECURITY.md.
