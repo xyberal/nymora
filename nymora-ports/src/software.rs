@@ -26,8 +26,9 @@
 //! backend now signs with the **provisional signature** in `nymora-crypto`: publicly
 //! verifiable, deterministic from the same per-agora seeds as before, and exactly as much a
 //! stand-in as the algebraic hash — sizes and algorithm move when the real circuit lands
-//! (the destination is EdDSA over Jubjub, §6.5, proposal 0033), and nothing here or in any
-//! test pins them.
+//! (the destination is EdDSA over Jubjub with a Poseidon transcript, stated as an
+//! equation in §9.1 and occupying the same 32-byte-key/64-byte-signature widths as this
+//! stand-in — proposals 0033, 0034), and nothing here or in any test pins them.
 //!
 //! # Where `nymora-crypto` begins and ends here
 //!

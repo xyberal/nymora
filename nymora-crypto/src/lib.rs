@@ -25,7 +25,8 @@
 //! begins.
 //!
 //! The proving system is chosen — Plonkish KZG over BLS12-381, with Poseidon as the
-//! algebraic hash (§6.5, proposal 0033) — but until the real circuit lands, the algebraic
+//! algebraic hash, pinned at instance level (§6.5; proposals 0033, 0034) — but until the
+//! real circuit lands, the algebraic
 //! family remains a documented stand-in behind
 //! the `provisional-algebraic-hash` feature, on by default; see [`algebraic`] for what that
 //! means and what it would cost to ship. The root-authority signature scheme sits on the

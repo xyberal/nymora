@@ -6,6 +6,24 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **The circuit's concrete instances are pinned** (§5.2, §6.5, §9.1; proposal 0034,
+  applied). The three instance-level facts proposal 0033 left open are now named, each
+  verified against a running circuit before being written down. The Poseidon instance:
+  width 3 (rate 2, capacity 1), α = 5, 8 full and 60 partial rounds over the BLS12-381
+  scalar field, constants Grain-generated and reproducible from a pinned invocation.
+  The certificate scheme: EdDSA over Jubjub stated as an equation — deterministic
+  nonce, Poseidon challenge over (R, PK, payload), 64-byte (R, S) signatures and
+  32-byte keys, the exact widths the provisional scheme already occupies — with
+  subgroup membership of every witness point part of the statement. The reference
+  string: Filecoin's phase-1 powers of tau, its excerpt to be committed with the
+  provenance chain and checksums; tests use a locally generated insecure string that
+  never ships. In evidence, the chain statement's expensive core (leaf commitment,
+  three depth-32 Poseidon Merkle paths, epoch-key correspondence, in-circuit
+  certificate verification, two derivations) was proven and verified end to end:
+  2^13 rows, ~350 ms proving on laptop-class hardware, ~1.9 ms verification, and a
+  3,296-byte fixed-size proof — recorded honestly against 0033's ~1 KB working
+  estimate. No mechanism, wire format, or vector changes; the provisional primitives
+  retire only with the real circuit, as 0033 already records.
 - **The proving system is chosen** (§5.2, §6.5, §9.1, §15; proposal 0033, applied).
   Plonkish KZG over BLS12-381 under a universal reference string inherited from an
   existing large ceremony — never a setup of this protocol's own — with Poseidon over

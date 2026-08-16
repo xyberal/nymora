@@ -34,7 +34,8 @@ use nymora_core::DIGEST_LEN;
 use sha2::{Digest, Sha256};
 
 /// SHA-256, standing in for the algebraic hash — Poseidon over the BLS12-381 scalar
-/// field (§6.5, proposal 0033) — until the real circuit lands.
+/// field, in the pinned instance of §6.5 (proposals 0033, 0034) — until the real
+/// circuit lands.
 ///
 /// Named to be conspicuous in a backtrace, in `cargo doc`, and in a grep. See the module
 /// documentation for what makes it provisional and what it would cost to ship.
@@ -53,8 +54,9 @@ impl HashBackend for ProvisionalAlgebraicBackend {
 
 /// The algebraic-family hasher: the single swap point for the whole protocol.
 ///
-/// When the real circuit lands, this alias becomes the Poseidon instance proposal 0033
-/// names and every value derived through it changes with it. That is a protocol-breaking
+/// When the real circuit lands, this alias becomes the Poseidon instance proposals 0033
+/// and 0034 pin (width 3, α = 5, 8 full and 60 partial rounds, Grain-generated
+/// constants) and every value derived through it changes with it. That is a protocol-breaking
 /// change requiring a domain-tag version bump, not a drop-in substitution.
 pub type AlgebraicHasher = Hasher<ProvisionalAlgebraicBackend>;
 
