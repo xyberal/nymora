@@ -39,6 +39,15 @@ jobs:
           cargo test -p nymora-circuits --no-default-features
           cargo test -p nymora-proofs --no-default-features
           cargo test -p nymora-accumulator --no-default-features
+      # The proving backend is a standalone crate (outside the workspace, like
+      # measure/) so the library workspace keeps its no_std discipline; it gets its
+      # own explicit steps. Tests run in release: they produce real proofs.
+      - name: Proving backend (nymora-plonk)
+        run: |
+          cd nymora-plonk
+          cargo fmt --all --check
+          cargo clippy --all-targets -- -D warnings
+          cargo test --release
       - name: License headers
         run: ./scripts/check-license-headers.sh
 

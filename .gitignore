@@ -1,6 +1,7 @@
 # Build output
 /target/
 /measure/target/
+/nymora-plonk/target/
 
 # This is a library workspace, so the lockfile is not committed.
 # The measurement harness commits its lockfile: pinned dependencies are part of

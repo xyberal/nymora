@@ -1,0 +1,38 @@
+# nymora-plonk — the real proving backend (proposals 0033, 0034).
+#
+# A standalone crate, deliberately outside the library workspace for the same reason
+# `measure/` is: the proving stack is a heavy, std-only dependency tree, and the
+# workspace's no_std discipline and build times stay untouched until the swap makes
+# this backend load-bearing. CI builds and tests it explicitly.
+[package]
+name = "nymora-plonk"
+version = "0.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+rust-version = "1.81"
+repository = "https://github.com/xyberal/nymora"
+publish = false
+description = "Both Nymora statements over Plonkish KZG on BLS12-381 (proposals 0033, 0034)"
+
+[dependencies]
+nymora-circuits = { path = "../nymora-circuits", default-features = false }
+midnight-zk-stdlib = "2.3"
+midnight-circuits = "7.2"
+midnight-curves = "0.3"
+midnight-proofs = "0.8"
+ff = "0.13"
+group = "0.13"
+rand = "0.8"
+rand_chacha = "0.3"
+blake2b_simd = "1"
+num-bigint = "0.4"
+
+[dev-dependencies]
+sha2 = "0.10"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[lints.clippy]
+all = "warn"
