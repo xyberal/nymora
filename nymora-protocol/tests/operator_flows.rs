@@ -9,9 +9,13 @@
 //! with their epoch; quorum decisions whose subjects bind their content; challenge-bound
 //! verification access with single-use challenges (0019); the live-auth round deriving one
 //! context for everyone; revocation taking effect at the very epoch it lands (§11);
-//! migration's acceptance path with the §9.3 window at both edges; the transparency log
-//! surviving audit and betraying tampering and forks; dissolution freezing everything
-//! while cached history still verifies; and exhaustion refusing at the door (§5.2).
+//! migration's acceptance path with the §9.3 window at both edges; a revoked credential
+//! refused migration by the statement's absence clause; a previously valid proof refused
+//! at the operator against fresher roots (0016); `redeem_access` refusing an unknown
+//! class; mid-life `current_bulletin()` re-serving the same statement rather than
+//! re-signing it; the transparency log surviving audit and betraying tampering and forks;
+//! dissolution freezing everything while cached history still verifies; and exhaustion
+//! refusing at the door (§5.2).
 
 #![cfg(all(feature = "provisional-algebraic-hash", feature = "operator"))]
 
@@ -52,6 +56,88 @@ fn member(seed: u8) -> Member {
 
 fn founded(founder: &mut Member, log: bool) -> Op {
     found(founder, 0x1b, if log { Some(0x1c) } else { None })
+}
+
+/// Successor material and the migration proof that spends `from` against the current
+/// roots — the happy-path assembly the two migration-refusal tests start from.
+fn cut_migration(
+    op: &Op,
+    from: &Member,
+    device: u8,
+    completion: u8,
+) -> (
+    SoftwareKeyStore,
+    TestStore,
+    nymora_core::Commitment,
+    nymora_core::Nullifier,
+    nymora_circuits::MigrationStubProof<DEPTH>,
+) {
+    let successor_keys = SoftwareKeyStore::new([device; 32]);
+    let mut successor_pk_buf = [0u8; 64];
+    let mut binding = [0u8; 64];
+    let written =
+        create_successor_root(AGORA, &successor_keys, &mut successor_pk_buf, &mut binding)
+            .expect("successor root");
+    let successor_pk = &successor_pk_buf[..written.public_key];
+
+    let mut old_pk = [0u8; 64];
+    let mut cert = [0u8; 128];
+    let mut handoff_bytes = [0u8; 512];
+    let len = authorize_migration(
+        AGORA,
+        &from.keys,
+        &from.store,
+        successor_pk,
+        &mut old_pk,
+        &mut cert,
+        &mut handoff_bytes,
+    )
+    .expect("authorization succeeds");
+    let handoff =
+        nymora_core::MigrationHandoff::decode(&handoff_bytes[..len]).expect("handoff decodes");
+
+    let mut new_store = TestStore::default();
+    let migrated = complete_migration(
+        AGORA,
+        &mut new_store,
+        &handoff,
+        successor_pk,
+        entropy(completion),
+    )
+    .expect("completion succeeds");
+
+    let mut stored_opening = [0u8; 32];
+    new_store
+        .load(AGORA, Slot::RootOpening, &mut stored_opening)
+        .unwrap()
+        .expect("successor opening stored");
+    let successor_opening = RootOpening::new(stored_opening);
+    let inclusion = op
+        .witness(from.witness_key.as_ref().unwrap(), TIER2, from.position)
+        .unwrap();
+    let revocation_absence = from.revocations.absence_witness(from.leaf.as_bytes());
+    let witness = MigrationWitness {
+        old_root_public_key: handoff.root_public_key,
+        old_root_opening: &handoff.root_opening,
+        credential_key: &handoff.credential_key,
+        old_leaf_witness: &inclusion,
+        migration_cert_signature: handoff.migration_cert,
+        successor_public_key: successor_pk,
+        successor_opening: &successor_opening,
+        revocation_absence: &revocation_absence,
+    };
+    let roots = from.roots.unwrap();
+    let (proof, spend) = prove_migration(
+        &StubProver,
+        &witness,
+        AGORA,
+        roots.class,
+        roots.revocation,
+        migrated.commitment,
+    )
+    .expect("a current credential migrates");
+    assert_eq!(spend, migrated.spend);
+    (successor_keys, new_store, migrated.commitment, spend, proof)
 }
 
 // ---- §5.2: the witness service (proposal 0025) ----
@@ -202,6 +288,39 @@ fn the_bulletin_is_a_signed_operator_statement() {
         &a.statement(AGORA),
         &a.signature,
     ));
+}
+
+/// Mid-life re-delivery is a re-serve, not a re-sign: two fetches between epoch events
+/// produce the same statement digest and the same signature (proposal 0024).
+#[test]
+fn current_bulletin_is_re_served_byte_identically() {
+    let mut alice = member(0x11);
+    let mut op = founded(&mut alice, true);
+    let mut bob = member(0x12);
+    admit(&mut op, &mut bob, &[&alice], 0x51);
+    advance(&mut op, &mut [&mut alice, &mut bob]);
+
+    let first = op.current_bulletin().expect("agora is live");
+    let second = op.current_bulletin().expect("agora is live");
+    assert_eq!(
+        first.statement(AGORA).digest(),
+        second.statement(AGORA).digest(),
+        "a mid-life re-serve produced a different statement"
+    );
+    assert_eq!(
+        first.signature, second.signature,
+        "a mid-life re-serve re-signed the statement"
+    );
+
+    // A real epoch event produces a new statement — the identity above is not
+    // "every bulletin looks the same".
+    advance(&mut op, &mut [&mut alice, &mut bob]);
+    let next = op.current_bulletin().expect("agora is live");
+    assert_ne!(
+        first.statement(AGORA).digest(),
+        next.statement(AGORA).digest(),
+        "the next epoch's bulletin matched the previous statement"
+    );
 }
 
 // ---- §4: the bootstrap arc ----
@@ -483,6 +602,67 @@ fn verification_is_member_gated_and_challenge_bound() {
         Some(ProtocolError::Unavailable),
         "an outsider assembled member material"
     );
+}
+
+/// An unknown policy class is refused at the gate — the same `Rejected` as a spent
+/// challenge or a bad proof, so a probe cannot enumerate configured classes (§7).
+#[test]
+fn redeem_access_refuses_an_unknown_class() {
+    let mut alice = member(0x11);
+    let mut op = founded(&mut alice, false);
+
+    let challenge = op.issue_challenge(entropy(0x71)).unwrap();
+    let proof = alice.acting(&op, |witness, epoch, roots| {
+        prove_verification_access(
+            &StubProver,
+            witness,
+            AGORA,
+            epoch,
+            roots,
+            challenge.as_bytes(),
+        )
+        .expect("a current member proves access")
+    });
+    let unknown = PolicyClass::from_bytes([0x99; 32]);
+    assert_eq!(
+        op.redeem_access(unknown, &proof, challenge).unwrap_err(),
+        ProtocolError::Rejected,
+        "an unknown class was distinguishable from any other refusal"
+    );
+}
+
+/// A previously valid standing proof, replayed after the roots have moved, is refused
+/// at the operator — standing is checked at the action (proposal 0016), not at the
+/// artifact. The honest prover cannot assemble a current witness after revocation;
+/// this is the verifier-side half of the same cut, against a member still in good
+/// standing whose proof is simply stale.
+#[test]
+fn a_stale_proof_is_refused_against_fresher_roots() {
+    let mut alice = member(0x11);
+    let mut op = founded(&mut alice, false);
+    let mut bob = member(0x12);
+    admit(&mut op, &mut bob, &[&alice], 0x51);
+    advance(&mut op, &mut [&mut alice, &mut bob]);
+
+    // Bob cuts a valid migration proof against this epoch's roots.
+    let (_keys, _store, successor, spend, stale) = cut_migration(&op, &bob, 0x2b, 0x2c);
+
+    // The roots move: Charlie lands, the boundary snapshots a new class root.
+    let mut charlie = Member::enroll(0x13, AGORA, TIER2, op.current_epoch());
+    admit(&mut op, &mut charlie, &[&alice], 0x52);
+    advance(&mut op, &mut [&mut alice, &mut bob, &mut charlie]);
+
+    assert_eq!(
+        op.migrate(TIER2, &stale, spend, successor).unwrap_err(),
+        ProtocolError::Rejected,
+        "a stale proof was accepted against fresher roots"
+    );
+
+    // Bob is still current: a proof cut against the new roots is accepted. The
+    // refusal above is the stale artifact, not the member.
+    let (_keys, _store, successor, spend, fresh) = cut_migration(&op, &bob, 0x2d, 0x2e);
+    op.migrate(TIER2, &fresh, spend, successor)
+        .expect("a current proof is accepted after the root move");
 }
 
 // ---- §8: live authentication ----
@@ -1265,4 +1445,106 @@ fn a_refused_migration_does_not_burn_the_spend() {
         )
         .expect("an unspent predecessor still acts");
     });
+}
+
+/// A revoked credential cannot migrate out from under its revocation: the statement's
+/// absence clause refuses a current witness, and a proof cut before the revocation is
+/// refused at the operator as any other refusal (§9.3, §11).
+#[test]
+fn a_revoked_credential_cannot_migrate() {
+    let mut alice = member(0x11);
+    let mut op = founded(&mut alice, false);
+    let mut bob = member(0x12);
+    admit(&mut op, &mut bob, &[&alice], 0x51);
+    advance(&mut op, &mut [&mut alice, &mut bob]);
+
+    // Bob prepares a successor while still current.
+    let (_keys, _store, successor, spend, proof) = cut_migration(&op, &bob, 0x2b, 0x2c);
+
+    // Alice revokes Bob. Governance is still 1.
+    let revoke = op
+        .propose(
+            Decision::Revocation { leaf: bob.leaf },
+            TIER2,
+            entropy(0x63),
+        )
+        .unwrap();
+    alice.approve(&mut op, revoke);
+    let bulletin = match op.execute(revoke).expect("quorum met") {
+        Executed::Revocation { bulletin } => bulletin,
+        other => panic!("wrong execution effect: {other:?}"),
+    };
+    alice.apply_bulletin(&bulletin);
+    // Worst case: Bob obtained the bulletin anyway (§11).
+    bob.apply_bulletin(&bulletin);
+
+    // The operator refuses the proof cut while Bob was current — the roots have
+    // moved, and standing is checked at the action.
+    assert_eq!(
+        op.migrate(TIER2, &proof, spend, successor).unwrap_err(),
+        ProtocolError::Rejected,
+        "a revoked credential's migration was accepted"
+    );
+
+    // And a fresh attempt cannot assemble: the old leaf is in the set the
+    // statement shows absence from.
+    let inclusion = op
+        .witness(bob.witness_key.as_ref().unwrap(), TIER2, bob.position)
+        .unwrap();
+    let revocation_absence = bob.revocations.absence_witness(bob.leaf.as_bytes());
+    let successor_keys = SoftwareKeyStore::new([0x2d; 32]);
+    let mut successor_pk_buf = [0u8; 64];
+    let mut binding = [0u8; 64];
+    let written =
+        create_successor_root(AGORA, &successor_keys, &mut successor_pk_buf, &mut binding)
+            .expect("successor root");
+    let successor_pk = &successor_pk_buf[..written.public_key];
+    let mut old_pk = [0u8; 64];
+    let mut cert = [0u8; 128];
+    let mut handoff_bytes = [0u8; 512];
+    let len = authorize_migration(
+        AGORA,
+        &bob.keys,
+        &bob.store,
+        successor_pk,
+        &mut old_pk,
+        &mut cert,
+        &mut handoff_bytes,
+    )
+    .expect("authorization succeeds");
+    let handoff =
+        nymora_core::MigrationHandoff::decode(&handoff_bytes[..len]).expect("handoff decodes");
+    let mut new_store = TestStore::default();
+    let migrated = complete_migration(AGORA, &mut new_store, &handoff, successor_pk, entropy(0x2e))
+        .expect("completion succeeds");
+    let mut stored_opening = [0u8; 32];
+    new_store
+        .load(AGORA, Slot::RootOpening, &mut stored_opening)
+        .unwrap()
+        .expect("successor opening stored");
+    let successor_opening = RootOpening::new(stored_opening);
+    let witness = MigrationWitness {
+        old_root_public_key: handoff.root_public_key,
+        old_root_opening: &handoff.root_opening,
+        credential_key: &handoff.credential_key,
+        old_leaf_witness: &inclusion,
+        migration_cert_signature: handoff.migration_cert,
+        successor_public_key: successor_pk,
+        successor_opening: &successor_opening,
+        revocation_absence: &revocation_absence,
+    };
+    let roots = bob.roots.unwrap();
+    assert_eq!(
+        prove_migration(
+            &StubProver,
+            &witness,
+            AGORA,
+            roots.class,
+            roots.revocation,
+            migrated.commitment,
+        )
+        .err(),
+        Some(ProtocolError::Malformed),
+        "a revoked credential produced a migration proof"
+    );
 }
