@@ -837,9 +837,20 @@ dependencies = [
  "nymora-circuits",
  "nymora-core",
  "nymora-crypto",
+ "nymora-ports",
  "nymora-proofs",
+ "nymora-protocol",
  "rand",
  "rand_chacha",
+ "sha2",
+]
+
+[[package]]
+name = "nymora-ports"
+version = "0.0.0"
+dependencies = [
+ "nymora-core",
+ "nymora-crypto",
  "sha2",
 ]
 
@@ -851,6 +862,19 @@ dependencies = [
  "nymora-circuits",
  "nymora-core",
  "nymora-crypto",
+]
+
+[[package]]
+name = "nymora-protocol"
+version = "0.0.0"
+dependencies = [
+ "nymora-accumulator",
+ "nymora-circuits",
+ "nymora-core",
+ "nymora-crypto",
+ "nymora-ports",
+ "nymora-proofs",
+ "zeroize",
 ]
 
 [[package]]

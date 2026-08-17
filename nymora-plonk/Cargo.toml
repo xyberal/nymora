@@ -38,6 +38,11 @@ nymora-proofs = { path = "../nymora-proofs", default-features = false }
 nymora-accumulator = { path = "../nymora-accumulator", default-features = false, features = [
     "build",
 ] }
+# The credential-lifecycle path: the system suite proves a credential minted by the
+# protocol's own `create`/`roll_epoch` on the real backend, so the stub can no longer be
+# the only witness to what the circuit accepts.
+nymora-protocol = { path = "../nymora-protocol", default-features = false }
+nymora-ports = { path = "../nymora-ports", features = ["software-key-store"] }
 
 [lints.rust]
 unsafe_code = "forbid"

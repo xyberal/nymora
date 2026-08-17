@@ -19,10 +19,13 @@ use nymora_core::{
 };
 use nymora_crypto::{commit, nullifier, signature};
 use nymora_plonk::backend::Backend;
+use nymora_ports::{SecureStorage, Slot, SoftwareKeyStore};
 use nymora_proofs::{
     prove_authorship, prove_migration, prove_vouch, verify_authorship, verify_migration,
     verify_vouch, EpochRoots,
 };
+use nymora_protocol::{create, load_acting_material, roll_epoch, FreshEntropy};
+use std::collections::HashMap;
 
 const DEPTH: usize = PROTOCOL_DEPTH;
 const AGORA: AgoraId = AgoraId::from_bytes([0x01; 32]);
@@ -305,5 +308,128 @@ fn the_committed_filecoin_excerpt_proves() {
             .expect("the inherited string proves");
     assert!(verify_authorship(
         &backend, &proof, AGORA, EPOCH, &w.roots, message, produced
+    ));
+}
+
+/// A minimal in-memory `SecureStorage` for driving the credential lifecycle.
+#[derive(Default)]
+struct MemoryStore {
+    values: HashMap<([u8; 32], Slot), Vec<u8>>,
+}
+
+impl SecureStorage for MemoryStore {
+    fn store(&mut self, agora: AgoraId, slot: Slot, value: &[u8]) -> Result<(), ProtocolError> {
+        self.values
+            .insert((*agora.as_bytes(), slot), value.to_vec());
+        Ok(())
+    }
+
+    fn load(
+        &self,
+        agora: AgoraId,
+        slot: Slot,
+        out: &mut [u8],
+    ) -> Result<Option<usize>, ProtocolError> {
+        let Some(value) = self.values.get(&(*agora.as_bytes(), slot)) else {
+            return Ok(None);
+        };
+        out.get_mut(..value.len())
+            .ok_or(ProtocolError::Malformed)?
+            .copy_from_slice(value);
+        Ok(Some(value.len()))
+    }
+
+    fn delete(&mut self, agora: AgoraId, slot: Slot) -> Result<(), ProtocolError> {
+        self.values.remove(&(*agora.as_bytes(), slot));
+        Ok(())
+    }
+}
+
+/// A credential minted by the protocol's own `create` — fed entropy that *exceeds* the
+/// field order, the case that would otherwise leave a member admitted into the tree yet
+/// permanently unable to prove — is certified with `roll_epoch`, assembled through
+/// `load_acting_material`, and proven on the *real* backend. The stub reduces such bytes
+/// and so cannot see the difference; the real backend strict-decodes, so only a proof here
+/// witnesses that `create` mints canonical. This end-to-end path is what keeps the stub
+/// from being the sole oracle for what the circuit accepts: revert the mint and it fails
+/// at `prove_authorship` rather than silently in production.
+#[test]
+fn a_freshly_created_credential_proves_on_the_real_backend() {
+    let keys = SoftwareKeyStore::new([0x9e; 32]);
+    let mut store = MemoryStore::default();
+
+    // Field-exceeding entropy for both durable secrets — the exact H2 case.
+    let mut pk_buf = [0u8; 64];
+    let mut binding = [0u8; 64];
+    let created = create(
+        AGORA,
+        &keys,
+        &mut store,
+        FreshEntropy::new([0xff; 32]),
+        FreshEntropy::new([0xff; 32]),
+        &mut pk_buf,
+        &mut binding,
+    )
+    .expect("creation succeeds");
+    let leaf = created.commitment;
+
+    // Certify the acting epoch: mints and stores the epoch key and its certificate.
+    let mut record = [0u8; 256];
+    roll_epoch(
+        AGORA,
+        &keys,
+        &mut store,
+        EPOCH,
+        FreshEntropy::new([0xff; 32]),
+        &mut record,
+    )
+    .expect("rollover succeeds");
+
+    // The operator's structures: the leaf under a class root, empty exclusion sets.
+    let mut tree = Tree::<DEPTH>::new();
+    tree.append(Commitment::from_bytes(nymora_crypto::field::to_bytes(
+        &nymora_crypto::F::from(999),
+    )))
+    .expect("room");
+    let position = tree.append(leaf).expect("room");
+    let leaf_witness = tree.witness(position).expect("appended");
+
+    let revocations = ExclusionSet::<DEPTH>::new();
+    let spends = ExclusionSet::<DEPTH>::new();
+
+    // The member's own spend nullifier, over the stored (minted) credential key.
+    let mut sk = [0u8; 32];
+    store
+        .load(AGORA, Slot::CredentialKey, &mut sk)
+        .unwrap()
+        .expect("credential stored");
+    let spend = nullifier::migration(&CredentialKey::new(sk), &leaf, &AGORA);
+
+    let revocation_absence = revocations.absence_witness(leaf.as_bytes());
+    let spend_absence = spends.absence_witness(spend.as_bytes());
+    let roots = EpochRoots {
+        class: tree.root(),
+        revocation: revocations.root(),
+        spend: spends.root(),
+    };
+
+    // Assemble the chain witness through the protocol's own loader, then prove.
+    let mut pk_load = [0u8; 64];
+    let mut record_load = [0u8; 256];
+    let material = load_acting_material(AGORA, &store, EPOCH, &mut pk_load, &mut record_load)
+        .expect("stored material loads");
+    let witness = material.witness(&leaf_witness, &revocation_absence, &spend_absence);
+
+    let message = MessageHash::from_bytes([0xaa; 32]);
+    let (proof, produced) = prove_authorship(backend(), &witness, AGORA, EPOCH, &roots, message)
+        .expect("a freshly created credential proves on the real backend");
+    assert!(verify_authorship(
+        backend(),
+        &proof,
+        AGORA,
+        EPOCH,
+        &roots,
+        message,
+        produced
     ));
 }
