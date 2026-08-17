@@ -158,6 +158,18 @@ pub fn verifies_absent<const DEPTH: usize>(
     witness: &AbsenceWitness<DEPTH>,
     root: &Root,
 ) -> bool {
+    // The bounds must lie in the ordering domain — the same `< 2^KEY_BITS` range check the
+    // circuit imposes on both comparison operands (`assert_absent`, via `lower_than(..,
+    // KEY_BITS)`; proposal 0035). Without it the two halves of this check disagree on a
+    // non-canonical bound: `ct_less` reads the raw 256-bit integer while `gap_leaf` reduces
+    // it mod r, so an attacker could inflate `high` by the field modulus (`high + r` reduces
+    // to `high`, leaving the gap leaf and root unchanged, yet compares as strictly greater)
+    // and prove a *present* key absent. Rejecting a non-canonical bound closes that gap and
+    // keeps this verifier a faithful twin of the circuit. An honestly built witness never
+    // trips it: every gap bound is a truncated key or a sentinel, all already in the domain.
+    if truncate_key(&witness.low) != witness.low || truncate_key(&witness.high) != witness.high {
+        return false;
+    }
     let t = truncate_key(key);
     let contained = ct_less(&witness.low, &t) & ct_less(&t, &witness.high);
     let recomputed = fold(gap_leaf(&witness.low, &witness.high), &witness.witness);
@@ -461,5 +473,65 @@ mod tests {
         assert_eq!(listed.len(), 2);
         assert_eq!(listed[0], truncate_key(&key(0x01)));
         assert_eq!(listed[1], truncate_key(&key(0xff)));
+    }
+
+    /// A non-canonical gap bound cannot forge absence for a *present* key. Inflating the
+    /// upper bound by the field modulus `r` leaves the gap leaf (and so the root) unchanged
+    /// — `gap_leaf` reduces mod r — while a raw-integer comparison would read it as strictly
+    /// greater. `verifies_absent` must reject the out-of-domain bound, exactly as the
+    /// circuit's range-checked comparison does (proposal 0035) — otherwise a revoked or
+    /// spent credential could prove itself absent.
+    #[test]
+    fn a_non_canonical_gap_bound_cannot_forge_absence() {
+        use super::AbsenceWitness;
+        use nymora_crypto::field::{to_bytes, F};
+
+        // Vary only byte 0 so `truncate_key` (which masks byte 31) cannot reorder these.
+        let low_byte = |v: u8| {
+            let mut k = [0u8; DIGEST_LEN];
+            k[0] = v;
+            k
+        };
+        // Little-endian byte add (inputs stay below 2^255 here, so no carry escapes).
+        let le_add = |a: &[u8; DIGEST_LEN], b: &[u8; DIGEST_LEN]| {
+            let mut out = [0u8; DIGEST_LEN];
+            let mut carry = 0u16;
+            for i in 0..DIGEST_LEN {
+                let s = a[i] as u16 + b[i] as u16 + carry;
+                out[i] = (s & 0xff) as u8;
+                carry = s >> 8;
+            }
+            out
+        };
+        // r as canonical LE bytes: (r - 1) + 1.
+        let modulus = {
+            let r_minus_one = to_bytes(&(-F::from(1u64)));
+            let mut one = [0u8; DIGEST_LEN];
+            one[0] = 1;
+            le_add(&r_minus_one, &one)
+        };
+
+        let present = low_byte(0x40);
+        let set = set(&[low_byte(0x10), present]);
+        let root = set.root();
+
+        // The present key honestly fails absence.
+        assert!(!verifies_absent(
+            &present,
+            &set.absence_witness(&present),
+            &root
+        ));
+
+        // The real gap (0x10, 0x40), reached via a probe strictly inside it.
+        let gap = set.absence_witness(&low_byte(0x30));
+        assert!(verifies_absent(&low_byte(0x30), &gap, &root));
+
+        // Forge: high' = high + r. Reduces to `high`, so the leaf and root still match, but
+        // as a raw integer high' > truncate(present) — the old code accepted this.
+        let forged = AbsenceWitness::new(*gap.low(), le_add(gap.high(), &modulus), *gap.path());
+        assert!(
+            !verifies_absent(&present, &forged, &root),
+            "a non-canonical bound forged absence for a present key"
+        );
     }
 }
