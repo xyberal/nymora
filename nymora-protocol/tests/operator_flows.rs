@@ -821,7 +821,11 @@ fn revocation_ends_standing_at_its_own_boundary() {
         other => panic!("wrong execution effect: {other:?}"),
     };
     assert!(
-        bulletin.revoked.contains(charlie.leaf.as_bytes()),
+        bulletin
+            .revoked
+            .contains(&nymora_accumulator::exclusion::truncate_key(
+                charlie.leaf.as_bytes()
+            )),
         "the bulletin does not carry the revocation"
     );
     assert_ne!(

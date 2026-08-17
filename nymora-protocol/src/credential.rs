@@ -22,11 +22,13 @@
 //! derives everything from one seed and is named unfit for production custody for exactly
 //! that reason.
 //!
-//! One asymmetry is deliberate. `sk_cred` and `r_root` are uniform bytes in any plausible
-//! construction — they exist to be hash preimages — so entropy *is* the secret. An epoch
-//! keypair has a shape chosen by the signature scheme, which is fixed with the proving
-//! system (§6.5), so [`roll_epoch`] takes the secret and public halves as the host's scheme
-//! produced them rather than pretending to derive one from the other.
+//! `sk_cred` and `r_root` are field-element secrets: fresh entropy minted canonical by
+//! clearing bits 254 and 255 (`field::mint_secret`, proposal 0035), so §9.1's
+//! one-key-one-representation clause holds by construction and the value the leaf commits to
+//! is the same one the proving backend decodes. An epoch keypair, by contrast, has a shape
+//! chosen by the signature scheme fixed with the proving system (§6.5), so [`roll_epoch`]
+//! takes the secret and public halves as the host's scheme produced them (minting the scalar
+//! into the subgroup order) rather than pretending to derive one from the other.
 //!
 //! # What failure leaves behind
 //!
@@ -44,7 +46,7 @@ use nymora_core::{CredentialKey, Epoch, RootOpening};
 use nymora_ports::{KeyStore, RootMaterialOut, RootMaterialWritten, SecureStorage, Slot};
 use zeroize::Zeroizing;
 
-use nymora_crypto::{commit, nullifier, signature};
+use nymora_crypto::{commit, field, nullifier, signature};
 
 /// Fresh secret bytes from the host's CSPRNG, consumed exactly once.
 ///
@@ -133,8 +135,13 @@ pub fn create(
     )?;
     let pk_root = &public_key[..root.public_key];
 
-    let sk_cred = CredentialKey::new(credential_key.take());
-    let r_root = RootOpening::new(root_opening.take());
+    // Mint both durable field-element secrets canonical (bits 254/255 cleared, proposal
+    // 0035): §9.1's one-key-one-representation clause holds by construction only for keys
+    // below the field order, and the proving backend decodes them strictly — raw entropy
+    // that happened to exceed the modulus would still open a leaf here (by reduction) yet
+    // never satisfy any proof.
+    let sk_cred = CredentialKey::new(field::mint_secret(credential_key.take()));
+    let r_root = RootOpening::new(field::mint_secret(root_opening.take()));
     // A key store that produced bytes naming no subgroup point has violated its own
     // contract; the caller's material is unusable.
     let commitment = commit(pk_root, &sk_cred, &r_root, &agora).ok_or(ProtocolError::Malformed)?;
@@ -465,7 +472,9 @@ pub fn complete_migration(
         return Err(ProtocolError::Malformed);
     }
 
-    let r_root = RootOpening::new(root_opening.take());
+    // The successor's opening is fresh; mint it canonical like every field-element secret
+    // (proposal 0035), so the new credential proves on the real backend.
+    let r_root = RootOpening::new(field::mint_secret(root_opening.take()));
     let commitment = commit(root_public_key, &handoff.credential_key, &r_root, &agora)
         .ok_or(ProtocolError::Malformed)?;
     // The consumed leaf is derived from the handoff, never carried in it — a derived value
@@ -645,14 +654,51 @@ mod tests {
             .load(AGORA_A, Slot::RootPublicKey, &mut pk)
             .unwrap()
             .unwrap();
+        // The durable secrets are minted canonical (proposal 0035), so the leaf is over the
+        // minted entropy, not the raw bytes.
         let expected = commit(
             &pk[..len],
-            &CredentialKey::new([0x44; 32]),
-            &RootOpening::new([0x22; 32]),
+            &CredentialKey::new(field::mint_secret([0x44; 32])),
+            &RootOpening::new(field::mint_secret([0x22; 32])),
             &AGORA_A,
         );
         assert_eq!(Some(made.commitment), expected);
         assert_eq!(made.root.binding, None, "the software backend claims none");
+    }
+
+    /// The durable secrets are minted canonical, so a credential created from *any*
+    /// entropy — even bytes that exceed the field order — stores values the real proving
+    /// backend can strict-decode. Without minting, roughly half of all fresh seeds would
+    /// leave a member admitted into the tree yet permanently unable to prove, and the
+    /// reducing stub would never notice.
+    #[test]
+    fn durable_secrets_are_canonical_even_from_field_exceeding_entropy() {
+        let mut store = TestStore::default();
+        let mut pk = [0u8; 32];
+        let mut binding = [0u8; 32];
+        // 0xff.. is well above the field order; raw storage would brick this credential.
+        create(
+            AGORA_A,
+            &key_store(),
+            &mut store,
+            entropy(0xff),
+            entropy(0xff),
+            &mut pk,
+            &mut binding,
+        )
+        .expect("creation succeeds");
+
+        for slot in [Slot::CredentialKey, Slot::RootOpening] {
+            let mut bytes = [0u8; 32];
+            store
+                .load(AGORA_A, slot, &mut bytes)
+                .unwrap()
+                .expect("secret stored");
+            assert!(
+                field::decode(&bytes).is_some(),
+                "{slot:?} is non-canonical — the real backend would refuse the witness"
+            );
+        }
     }
 
     /// The atomicity contract: a failure part-way must leave no slot behind.
@@ -924,7 +970,11 @@ mod tests {
         // The spend is the per-leaf migration nullifier over the carried key.
         assert_eq!(
             migrated.spend,
-            nullifier::migration(&CredentialKey::new([0x44; 32]), &old.commitment, &AGORA_A)
+            nullifier::migration(
+                &CredentialKey::new(field::mint_secret([0x44; 32])),
+                &old.commitment,
+                &AGORA_A
+            )
         );
         assert_ne!(migrated.commitment, old.commitment);
 
@@ -934,7 +984,7 @@ mod tests {
             .load(AGORA_A, Slot::CredentialKey, &mut sk)
             .unwrap()
             .expect("sk_cred carried over");
-        assert_eq!(sk, [0x44; 32]);
+        assert_eq!(sk, field::mint_secret([0x44; 32]));
     }
 
     /// One leaf, one spend — but a lineage migrates more than once, and each consumed leaf
