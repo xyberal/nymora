@@ -1,235 +1,276 @@
 {
-  "note": "Generated independently of the Rust implementation; see vectors/README.md",
-  "constructions": [
+ "note": "Generated independently of the Rust implementation; see vectors/README.md",
+ "constructions": [
+  {
+   "name": "hash",
+   "spec": "§6.5",
+   "status": "settled",
+   "cases": [
     {
-      "name": "hash",
-      "spec": "\u00a76.5",
-      "status": "settled",
-      "cases": [
-        {
-          "name": "framed-absorb",
-          "domain": "nymora/v0/ledger/entry",
-          "inputs": [
-            "6e796d6f7261"
-          ],
-          "output": "3c434db8f7866092f301a369bf39c781bfaf1824adcac8eb502aa3d797d998b5"
-        },
-        {
-          "name": "empty-input",
-          "domain": "nymora/v0/agora-id",
-          "inputs": [
-            ""
-          ],
-          "output": "3abb3a010a09538f174c96ab1b0aa6999c85b1445f93b7f9e49153c57785b483"
-        },
-        {
-          "name": "boundary-not-movable-a",
-          "domain": "nymora/v0/agora-id",
-          "inputs": [
-            "6162",
-            "63"
-          ],
-          "output": "02104168d6048ff85cd8cedb5d9bd48ed1d778892ae95cb1544252b3898520db"
-        },
-        {
-          "name": "boundary-not-movable-b",
-          "domain": "nymora/v0/agora-id",
-          "inputs": [
-            "61",
-            "6263"
-          ],
-          "output": "05316d7b2f5a2e073f35b07b2fd9b937c85775918ce492cf8d973d55eda1983a"
-        }
-      ]
+     "name": "framed-absorb",
+     "domain": "nymora/v0/ledger/entry",
+     "inputs": [
+      "6e796d6f7261"
+     ],
+     "output": "3c434db8f7866092f301a369bf39c781bfaf1824adcac8eb502aa3d797d998b5"
     },
     {
-      "name": "kdf",
-      "spec": "\u00a79.1",
-      "status": "settled",
-      "cases": [
-        {
-          "name": "hkdf-sha256",
-          "domain": "nymora/v0/tag/key",
-          "ikm": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
-          "context": "65706f63682d37",
-          "output": "2508b7478fe5e0b736c63e9b696f473e8a9b4df6dbf99fa9295618fc90833c51"
-        }
-      ]
+     "name": "empty-input",
+     "domain": "nymora/v0/agora-id",
+     "inputs": [
+      ""
+     ],
+     "output": "3abb3a010a09538f174c96ab1b0aa6999c85b1445f93b7f9e49153c57785b483"
     },
     {
-      "name": "agora_id",
-      "spec": "\u00a73",
-      "status": "settled",
-      "cases": [
-        {
-          "name": "single-party",
-          "ceremony": "0000000000",
-          "founding_key": "7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e",
-          "output": "c2dd7b5eeb10d4a718c10e12d933abdd60bbee48c2158e88bbe6e43fa93e9e6f"
-        },
-        {
-          "name": "threshold-2-of-3",
-          "ceremony": "0102000300",
-          "founding_key": "7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e",
-          "output": "750e2e95e90978a873ea5f5d42188db51a45453f7f5e44696c4d66d379940fd7"
-        }
-      ]
+     "name": "boundary-not-movable-a",
+     "domain": "nymora/v0/agora-id",
+     "inputs": [
+      "6162",
+      "63"
+     ],
+     "output": "02104168d6048ff85cd8cedb5d9bd48ed1d778892ae95cb1544252b3898520db"
     },
     {
-      "name": "policy_class",
-      "spec": "\u00a75.2",
-      "status": "settled",
-      "cases": [
-        {
-          "name": "tier-2-members",
-          "agora_id": "7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e",
-          "label": "746965722d322d6d656d62657273",
-          "output": "5a296920ceef7bfcb2acbb9a9b59d2aac5d1f4a81054a18a95328eefcf769223"
-        }
-      ]
-    },
-    {
-      "name": "commit",
-      "spec": "\u00a79.1",
-      "status": "provisional",
-      "cases": [
-        {
-          "name": "leaf",
-          "pk_root": "1111111111111111111111111111111111111111111111111111111111111111",
-          "sk_cred": "4444444444444444444444444444444444444444444444444444444444444444",
-          "r_root": "2222222222222222222222222222222222222222222222222222222222222222",
-          "agora_id": "9999999999999999999999999999999999999999999999999999999999999999",
-          "output": "12ab9a5b36f4990da91407dd552e3761c41485d5f8dde494ad30c9bbce211064"
-        }
-      ]
-    },
-    {
-      "name": "nullifier",
-      "spec": "\u00a74.3, \u00a75.3, \u00a76.1, \u00a79.3",
-      "status": "provisional",
-      "cases": [
-        {
-          "name": "vouch",
-          "context": "vouch",
-          "key": "3131313131313131313131313131313131313131313131313131313131313131",
-          "scope": "73657373696f6e2d31",
-          "agora_id": "9999999999999999999999999999999999999999999999999999999999999999",
-          "output": "0e9ab94d65d41c47fb563a521266ae2d462eafb28be5a2140415d6668448e338"
-        },
-        {
-          "name": "attestation",
-          "context": "attestation",
-          "key": "3232323232323232323232323232323232323232323232323232323232323232",
-          "scope": "5555555555555555555555555555555555555555555555555555555555555555",
-          "agora_id": "9999999999999999999999999999999999999999999999999999999999999999",
-          "output": "815e0f051d9e732c14355f40497d6fe482679fe637be8b2b1d0b50f853c1048d"
-        },
-        {
-          "name": "policy",
-          "context": "policy",
-          "key": "3333333333333333333333333333333333333333333333333333333333333333",
-          "scope": "70726f706f73616c2d31",
-          "agora_id": "9999999999999999999999999999999999999999999999999999999999999999",
-          "output": "15b59cc0c13678b46e07f3f749a215bb433d45fff430d9d9987aad531805b633"
-        },
-        {
-          "name": "migration",
-          "context": "migration",
-          "key": "3434343434343434343434343434343434343434343434343434343434343434",
-          "leaf": "abababababababababababababababababababababababababababababababab",
-          "agora_id": "9999999999999999999999999999999999999999999999999999999999999999",
-          "output": "44de43cea135ea53aea7c525b2989b15a9d694e79051f5c17aab5f85377f0f52"
-        }
-      ]
-    },
-    {
-      "name": "live_auth_commitment",
-      "spec": "§8.1",
-      "status": "settled",
-      "cases": [
-        {
-          "name": "fixed-pair",
-          "nonce": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "blinding": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-          "output": "2196e0fc4f1f2651004aab75720cf48a6678ff4690c0a1ff3f6fcfef81ce50cb"
-        }
-      ]
-    },
-    {
-      "name": "live_auth_context",
-      "spec": "§8.1",
-      "status": "settled",
-      "cases": [
-        {
-          "name": "three-participants-unsorted-input",
-          "nonces": [
-            "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-            "1111111111111111111111111111111111111111111111111111111111111111",
-            "7777777777777777777777777777777777777777777777777777777777777777"
-          ],
-          "channel_metadata": "6368616e6e656c2d31",
-          "output": "4ea2808c276f2ebd696aa369fd7fde1125fd3e3d661b0de04e0e700599a8f003"
-        }
-      ]
-    },
-    {
-      "name": "live_auth_sas",
-      "spec": "§8.3",
-      "status": "settled",
-      "cases": [
-        {
-          "name": "fixed-context",
-          "context": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-          "output": "ba74ea85"
-        }
-      ]
-    },
-    {
-      "name": "pseudonym",
-      "spec": "§8.1",
-      "status": "provisional",
-      "cases": [
-        {
-          "name": "session",
-          "key": "5555555555555555555555555555555555555555555555555555555555555555",
-          "context": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-          "agora_id": "9999999999999999999999999999999999999999999999999999999999999999",
-          "output": "45c12859854f28db8b9a336476e949601f9435b96ac5d1dd71efb736c5308e38"
-        }
-      ]
-    },
-    {
-      "name": "derive_tag_key",
-      "spec": "\u00a76.4",
-      "status": "settled",
-      "cases": [
-        {
-          "name": "epoch-7",
-          "agora_secret": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
-          "agora_id": "7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e",
-          "epoch": 7,
-          "output": "75dc57d11d4d1f0492f7151bb65fcd346e6986c69dc83429a7c3f4acfbca6095"
-        }
-      ]
-    },
-    {
-      "name": "tag",
-      "spec": "\u00a76.4",
-      "status": "settled",
-      "cases": [
-        {
-          "name": "fixed-key",
-          "key": "0707070707070707070707070707070707070707070707070707070707070707",
-          "message_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "output": "6b051499009e0f5d5064481b95232ed8978afc5e82ffbfcfeb52a10cd1b50f1f"
-        },
-        {
-          "name": "from-derived-key",
-          "key": "75dc57d11d4d1f0492f7151bb65fcd346e6986c69dc83429a7c3f4acfbca6095",
-          "message_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "output": "4f39c3cf464da5dffb2df68a91bcb2d60b80cbb177c9023802d20f009d6f367f"
-        }
-      ]
+     "name": "boundary-not-movable-b",
+     "domain": "nymora/v0/agora-id",
+     "inputs": [
+      "61",
+      "6263"
+     ],
+     "output": "05316d7b2f5a2e073f35b07b2fd9b937c85775918ce492cf8d973d55eda1983a"
     }
-  ]
+   ]
+  },
+  {
+   "name": "kdf",
+   "spec": "§9.1",
+   "status": "settled",
+   "cases": [
+    {
+     "name": "hkdf-sha256",
+     "domain": "nymora/v0/tag/key",
+     "ikm": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+     "context": "65706f63682d37",
+     "output": "2508b7478fe5e0b736c63e9b696f473e8a9b4df6dbf99fa9295618fc90833c51"
+    }
+   ]
+  },
+  {
+   "name": "agora_id",
+   "spec": "§3",
+   "status": "settled",
+   "cases": [
+    {
+     "name": "single-party",
+     "ceremony": "0000000000",
+     "founding_key": "7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e",
+     "output": "c2dd7b5eeb10d4a718c10e12d933abdd60bbee48c2158e88bbe6e43fa93e9e6f"
+    },
+    {
+     "name": "threshold-2-of-3",
+     "ceremony": "0102000300",
+     "founding_key": "7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e",
+     "output": "750e2e95e90978a873ea5f5d42188db51a45453f7f5e44696c4d66d379940fd7"
+    }
+   ]
+  },
+  {
+   "name": "policy_class",
+   "spec": "§5.2",
+   "status": "settled",
+   "cases": [
+    {
+     "name": "tier-2-members",
+     "agora_id": "7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e",
+     "label": "746965722d322d6d656d62657273",
+     "output": "5a296920ceef7bfcb2acbb9a9b59d2aac5d1f4a81054a18a95328eefcf769223"
+    }
+   ]
+  },
+  {
+   "name": "commit",
+   "spec": "§9.1",
+   "status": "settled",
+   "cases": [
+    {
+     "name": "leaf",
+     "pk_root": "e772c7a2fd85a43a44d4555692a70a8f584ff41fbec0a29d8de2c0d56ec4d219",
+     "sk_cred": "4444444444444444444444444444444444444444444444444444444444444444",
+     "r_root": "2222222222222222222222222222222222222222222222222222222222222222",
+     "agora_id": "9999999999999999999999999999999999999999999999999999999999999999",
+     "output": "f62fec485e7a971ee6972210e4bbec445aa1830196d815652f5bc494a8a24d0d"
+    }
+   ]
+  },
+  {
+   "name": "nullifier",
+   "spec": "§4.3, §5.3, §6.1, §9.3",
+   "status": "settled",
+   "cases": [
+    {
+     "name": "vouch",
+     "context": "vouch",
+     "key": "3131313131313131313131313131313131313131313131313131313131313131",
+     "scope": "73657373696f6e2d31",
+     "agora_id": "9999999999999999999999999999999999999999999999999999999999999999",
+     "output": "7c315ebebf6211e49579aebf86aff78e57f438f0545461fadc52f5cc1e722d12"
+    },
+    {
+     "name": "attestation",
+     "context": "attestation",
+     "key": "3232323232323232323232323232323232323232323232323232323232323202",
+     "scope": "5555555555555555555555555555555555555555555555555555555555555555",
+     "agora_id": "9999999999999999999999999999999999999999999999999999999999999999",
+     "output": "4b1f9391f750c4c1ee8c8b91223bf34e66684a9c392c5f1ed717c3e741be1548"
+    },
+    {
+     "name": "policy",
+     "context": "policy",
+     "key": "3333333333333333333333333333333333333333333333333333333333333333",
+     "scope": "70726f706f73616c2d31",
+     "agora_id": "9999999999999999999999999999999999999999999999999999999999999999",
+     "output": "1f9ea60fab6e9d6dc28a9288ed7bc313d6b9c18e5868d07408359dd1c8dd6721"
+    },
+    {
+     "name": "migration",
+     "context": "migration",
+     "key": "3434343434343434343434343434343434343434343434343434343434343434",
+     "leaf": "2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b",
+     "agora_id": "9999999999999999999999999999999999999999999999999999999999999999",
+     "output": "1065204568a2ec867a16910b959b6f1e4c31f33c2d13e5babbd6f6e85f8d2314"
+    }
+   ]
+  },
+  {
+   "name": "live_auth_commitment",
+   "spec": "§8.1",
+   "status": "settled",
+   "cases": [
+    {
+     "name": "fixed-pair",
+     "nonce": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "blinding": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "output": "2196e0fc4f1f2651004aab75720cf48a6678ff4690c0a1ff3f6fcfef81ce50cb"
+    }
+   ]
+  },
+  {
+   "name": "live_auth_context",
+   "spec": "§8.1",
+   "status": "settled",
+   "cases": [
+    {
+     "name": "three-participants-unsorted-input",
+     "nonces": [
+      "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "1111111111111111111111111111111111111111111111111111111111111111",
+      "7777777777777777777777777777777777777777777777777777777777777777"
+     ],
+     "channel_metadata": "6368616e6e656c2d31",
+     "output": "4ea2808c276f2ebd696aa369fd7fde1125fd3e3d661b0de04e0e700599a8f003"
+    }
+   ]
+  },
+  {
+   "name": "live_auth_sas",
+   "spec": "§8.3",
+   "status": "settled",
+   "cases": [
+    {
+     "name": "fixed-context",
+     "context": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+     "output": "ba74ea85"
+    }
+   ]
+  },
+  {
+   "name": "pseudonym",
+   "spec": "§8.1",
+   "status": "settled",
+   "cases": [
+    {
+     "name": "session",
+     "key": "5555555555555555555555555555555555555555555555555555555555555505",
+     "context": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+     "agora_id": "9999999999999999999999999999999999999999999999999999999999999999",
+     "output": "d0fcb626cefd1f2dd81ae2ae85273512048b61cd1a5d25266added4f9f9bb807"
+    }
+   ]
+  },
+  {
+   "name": "derive_tag_key",
+   "spec": "§6.4",
+   "status": "settled",
+   "cases": [
+    {
+     "name": "epoch-7",
+     "agora_secret": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+     "agora_id": "7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e",
+     "epoch": 7,
+     "output": "75dc57d11d4d1f0492f7151bb65fcd346e6986c69dc83429a7c3f4acfbca6095"
+    }
+   ]
+  },
+  {
+   "name": "tag",
+   "spec": "§6.4",
+   "status": "settled",
+   "cases": [
+    {
+     "name": "fixed-key",
+     "key": "0707070707070707070707070707070707070707070707070707070707070707",
+     "message_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "output": "6b051499009e0f5d5064481b95232ed8978afc5e82ffbfcfeb52a10cd1b50f1f"
+    },
+    {
+     "name": "from-derived-key",
+     "key": "75dc57d11d4d1f0492f7151bb65fcd346e6986c69dc83429a7c3f4acfbca6095",
+     "message_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "output": "4f39c3cf464da5dffb2df68a91bcb2d60b80cbb177c9023802d20f009d6f367f"
+    }
+   ]
+  },
+  {
+   "name": "epoch_cert_message",
+   "spec": "§9.1",
+   "status": "settled",
+   "cases": [
+    {
+     "name": "message",
+     "agora_id": "9999999999999999999999999999999999999999999999999999999999999999",
+     "epoch": 7,
+     "epoch_public_key": "96a37bfb25c8f8ef7789cd1961a0f12d131552f779d72f3a007778080f87df83",
+     "output": "ab29a67d02a952ae068d373a4c172947e50db80d6d238ac422b4640c52e8ee2e"
+    }
+   ]
+  },
+  {
+   "name": "migration_cert_message",
+   "spec": "§9.3",
+   "status": "settled",
+   "cases": [
+    {
+     "name": "message",
+     "agora_id": "9999999999999999999999999999999999999999999999999999999999999999",
+     "successor_public_key": "96a37bfb25c8f8ef7789cd1961a0f12d131552f779d72f3a007778080f87df83",
+     "output": "0ef8fdc1b9c2c6ed0f1de4180b91bb6a890564a884117b6785d21da2ba71312a"
+    }
+   ]
+  },
+  {
+   "name": "certificate_sign",
+   "spec": "§9.1",
+   "status": "settled",
+   "cases": [
+    {
+     "name": "deterministic",
+     "sk": "4242424242424242424242424242424242424242424242424242424242424202",
+     "message_field": "0700000000000000000000000000000000000000000000000000000000000000",
+     "public_key": "3a16d1e4fe70984f8ebefd515d9e2a07ed23efbee9a76d1c10f14c98118c1f49",
+     "output": "ce55f7c6684978bef34a8e4b84d36457b615b753e0d0a7bcde03232a6df24cba1450f6f310bed36badf73ff545c52669032a4842728b3168cf2c67819142750e"
+    }
+   ]
+  }
+ ]
 }

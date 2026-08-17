@@ -16,33 +16,28 @@
 //! Callers exercising the variance path against this backend see the weakest case from the first
 //! day, rather than discovering it when a hardware backend arrives and behaves differently.
 //!
-//! # The signatures are real now, and provisional
+//! # The signatures are the real scheme
 //!
-//! Before the stub prover, this backend's "signatures" were keyed hashes, on a documented premise:
-//! nothing verified them, and nothing should, because the real scheme is fixed with the proving
-//! system (§6.5) and anything committed early would prejudge that choice. The stub prover ended
-//! the premise — it must check "this certificate verifies under `pk_root`" holding only the
-//! public key, and no keyed hash is verifiable by the holder of a public value alone. So the
-//! backend now signs with the **provisional signature** in `nymora-crypto`: publicly
-//! verifiable, deterministic from the same per-agora seeds as before, and exactly as much a
-//! stand-in as the algebraic hash — sizes and algorithm move when the real circuit lands
-//! (the destination is EdDSA over Jubjub with a Poseidon transcript, stated as an
-//! equation in §9.1 and occupying the same 32-byte-key/64-byte-signature widths as this
-//! stand-in — proposals 0033, 0034), and nothing here or in any test pins them.
+//! The backend signs with the certificate scheme the standardized circuit verifies:
+//! EdDSA over Jubjub with a Poseidon transcript, stated as an equation in §9.1
+//! (proposals 0033, 0034) and implemented in `nymora-crypto`. Each agora's signing
+//! scalar is minted from the derived seed by the truncation rule of proposal 0035, so
+//! every key this store produces is canonical by construction. What stays provisional
+//! is the *custody*, not the cryptography: one software seed behind every agora is
+//! exactly what no hardware backend looks like.
 //!
 //! # Where `nymora-crypto` begins and ends here
 //!
 //! The per-agora seed derivations remain local keyed hashes over local separators: they have no
 //! counterparty, are never recomputed by anyone else, and registering stand-in entries in the
 //! permanent protocol domain-tag registry would be a worse trade than the few lines of framing
-//! below. The signatures are the opposite case — the stub verifier recomputes exactly what was
-//! signed — so they come from `nymora-crypto`, where every value with a counterparty must live
-//! or two implementations will eventually disagree.
+//! below. The signatures are the opposite case — every verifier recomputes exactly what was
+//! signed — so both the message compression and the equation come from `nymora-crypto`,
+//! where every value with a counterparty must live or two implementations will
+//! eventually disagree.
 //!
 //! The local prefixes are deliberately **not** shaped like `nymora/v0/...` protocol domain
-//! tags, so that no one mistakes one for the other. Protocol tags do appear in what the signing
-//! methods absorb — but as part of the canonical certificate payloads from `nymora-core`, which
-//! are the message being signed, not this backend's own separation.
+//! tags, so that no one mistakes one for the other.
 
 use crate::key_store::{
     Capabilities, EpochCertPayload, KeyStore, MigrationCertPayload, RootMaterialOut,
@@ -98,33 +93,34 @@ impl SoftwareKeyStore {
         }
     }
 
-    /// Derives the signing seed for one agora's root key.
+    /// Derives the signing scalar for one agora's root key.
     ///
-    /// One master seed, one signing seed per agora, one keypair per signing seed: `create_root`
-    /// and both signing methods meet at this derivation, which is what makes the signatures
-    /// verify under the public key `create_root` published.
-    fn root_seed(&self, agora: AgoraId) -> SecretBytes<{ signature::SEED_LEN }> {
+    /// One master seed, one derived seed per agora, one canonical scalar per seed (the
+    /// minting rule of proposal 0035): `create_root` and both signing methods meet at
+    /// this derivation, which is what makes the signatures verify under the public key
+    /// `create_root` published.
+    fn root_key(&self, agora: AgoraId) -> SecretBytes<{ signature::SEED_LEN }> {
         let mut hasher = Sha256::new();
         framed(&mut hasher, ROOT);
         framed(&mut hasher, self.seed.expose());
         framed(&mut hasher, agora.as_bytes());
-        SecretBytes::new(hasher.finalize().into())
+        SecretBytes::new(signature::mint_signing_secret(hasher.finalize().into()))
     }
 
-    /// Signs a canonical certificate payload with one agora's root key.
+    /// Signs a compressed certificate message with one agora's root key.
     ///
-    /// The payload is streamed through `encode_parts` rather than re-encoded here, so this
-    /// backend cannot drift from the layout `nymora-core` pins — the property the `KeyStore`
-    /// contract demands of real backends, obeyed by the stand-in for the same reason. The
-    /// signed message is exactly the canonical bytes, nothing more: the provisional signature
-    /// adds no framing of its own, precisely so a verifier reconstructing the payload verifies
-    /// the same message.
-    fn sign_canonical(
+    /// The message is computed by `nymora-crypto`'s canonical compression rather than
+    /// re-derived here, so this backend cannot drift from what the circuit recomputes —
+    /// the property the `KeyStore` contract demands of real backends.
+    fn sign_message(
         &self,
         agora: AgoraId,
-        encode_parts: impl FnOnce(&mut dyn FnMut(&[u8])),
-    ) -> [u8; signature::SIGNATURE_LEN] {
-        signature::sign(self.root_seed(agora).expose(), encode_parts)
+        message: Option<nymora_crypto::F>,
+    ) -> Result<[u8; signature::SIGNATURE_LEN], ProtocolError> {
+        // No message means the payload's key bytes name no subgroup point — the
+        // caller's own input, unusable for this scheme.
+        let message = message.ok_or(ProtocolError::Malformed)?;
+        signature::sign(self.root_key(agora).expose(), &message).ok_or(ProtocolError::Malformed)
     }
 }
 
@@ -145,7 +141,8 @@ impl KeyStore for SoftwareKeyStore {
         agora: AgoraId,
         out: RootMaterialOut<'_>,
     ) -> Result<RootMaterialWritten, ProtocolError> {
-        let public_key = signature::public_key(self.root_seed(agora).expose());
+        let public_key = signature::public_key(self.root_key(agora).expose())
+            .expect("minted keys are canonical");
         Ok(RootMaterialWritten {
             public_key: put(out.public_key, &public_key)?,
             // Not `Some(0)`: this backend produces no binding at all, which is a different
@@ -159,7 +156,12 @@ impl KeyStore for SoftwareKeyStore {
         payload: &EpochCertPayload<'_>,
         signature: &mut [u8],
     ) -> Result<usize, ProtocolError> {
-        let value = self.sign_canonical(payload.agora, |put| payload.encode_parts(put));
+        let message = nymora_crypto::signature::epoch_cert_message(
+            &payload.agora,
+            payload.epoch,
+            payload.epoch_public_key,
+        );
+        let value = self.sign_message(payload.agora, message)?;
         put(signature, &value)
     }
 
@@ -168,7 +170,11 @@ impl KeyStore for SoftwareKeyStore {
         payload: &MigrationCertPayload<'_>,
         signature: &mut [u8],
     ) -> Result<usize, ProtocolError> {
-        let value = self.sign_canonical(payload.agora, |put| payload.encode_parts(put));
+        let message = nymora_crypto::signature::migration_cert_message(
+            &payload.agora,
+            payload.successor_public_key,
+        );
+        let value = self.sign_message(payload.agora, message)?;
         put(signature, &value)
     }
 }
@@ -187,6 +193,13 @@ mod tests {
 
     fn store() -> SoftwareKeyStore {
         SoftwareKeyStore::new(SEED)
+    }
+
+    /// A real subgroup point to certify: the payload's key bytes must name one, or
+    /// there is no message to sign.
+    fn epoch_point(byte: u8) -> [u8; 32] {
+        signature::public_key(&signature::mint_signing_secret([byte; 32]))
+            .expect("minted keys are canonical")
     }
 
     fn root_of(store: &SoftwareKeyStore, agora: AgoraId) -> [u8; signature::PUBLIC_KEY_LEN] {
@@ -294,74 +307,55 @@ mod tests {
 
     /// The property the proof layer relies on: what this backend signs, anyone holding the
     /// public key from `create_root` can verify — including the stub prover recomputing
-    /// the canonical payload from witness values.
+    /// the compressed message from witness values.
     #[test]
     fn an_epoch_cert_verifies_under_the_created_root() {
         let store = store();
-        let payload = EpochCertPayload {
-            agora: AGORA_A,
-            epoch: Epoch::new(7),
-            epoch_public_key: &[0xcc; 32],
-        };
-        let sig = epoch_cert(&store, AGORA_A, 7, &[0xcc; 32]);
-        assert!(signature::verify(
-            &root_of(&store, AGORA_A),
-            |put| payload.encode_parts(put),
-            &sig
-        ));
+        let key = epoch_point(0xcc);
+        let sig = epoch_cert(&store, AGORA_A, 7, &key);
+        let message = signature::epoch_cert_message(&AGORA_A, Epoch::new(7), &key)
+            .expect("the key is a subgroup point");
+        assert!(signature::verify(&root_of(&store, AGORA_A), &message, &sig));
     }
 
     #[test]
     fn a_migration_cert_verifies_under_the_created_root() {
         let store = store();
-        let payload = MigrationCertPayload {
-            agora: AGORA_A,
-            successor_public_key: &[0xee; 32],
-        };
-        let sig = migration(&store, AGORA_A, &[0xee; 32]);
-        assert!(signature::verify(
-            &root_of(&store, AGORA_A),
-            |put| payload.encode_parts(put),
-            &sig
-        ));
+        let key = epoch_point(0xee);
+        let sig = migration(&store, AGORA_A, &key);
+        let message =
+            signature::migration_cert_message(&AGORA_A, &key).expect("the key is a subgroup point");
+        assert!(signature::verify(&root_of(&store, AGORA_A), &message, &sig));
     }
 
-    /// The two certificate kinds must not be confusable, and now that the signatures are
-    /// verifiable the property is checked the way an attacker would probe it: a signature
-    /// produced as one kind, presented as the other, must not verify. The separation comes
-    /// from the protocol domain tag leading each canonical payload, not from anything local
-    /// to this backend.
+    /// The two certificate kinds must not be confusable, checked the way an attacker
+    /// would probe it: a signature produced as one kind, presented as the other, must
+    /// not verify. The separation comes from the field domain leading each compressed
+    /// message, not from anything local to this backend.
     #[test]
     fn one_certificate_kind_does_not_verify_as_the_other() {
         let store = store();
+        let key = epoch_point(0xcc);
         let root = root_of(&store, AGORA_A);
-        let epoch_sig = epoch_cert(&store, AGORA_A, 0, &[0xcc; 32]);
-        let migration_payload = MigrationCertPayload {
-            agora: AGORA_A,
-            successor_public_key: &[0xcc; 32],
-        };
-        assert!(!signature::verify(
-            &root,
-            |put| migration_payload.encode_parts(put),
-            &epoch_sig
-        ));
+        let epoch_sig = epoch_cert(&store, AGORA_A, 0, &key);
+        let migration_message =
+            signature::migration_cert_message(&AGORA_A, &key).expect("the key is a subgroup point");
+        assert!(!signature::verify(&root, &migration_message, &epoch_sig));
     }
 
     /// The requirement stated on `KeyStore`: a certificate must not replay across agoras.
-    /// Two properties compound here — the payload names its agora, and each agora's root is
-    /// a different key entirely.
+    /// Two properties compound here — the message names its agora, and each agora's root
+    /// is a different key entirely.
     #[test]
     fn an_epoch_cert_does_not_verify_in_another_agora() {
         let store = store();
-        let sig = epoch_cert(&store, AGORA_A, 7, &[0xcc; 32]);
-        let replayed = EpochCertPayload {
-            agora: AGORA_B,
-            epoch: Epoch::new(7),
-            epoch_public_key: &[0xcc; 32],
-        };
+        let key = epoch_point(0xcc);
+        let sig = epoch_cert(&store, AGORA_A, 7, &key);
+        let replayed = signature::epoch_cert_message(&AGORA_B, Epoch::new(7), &key)
+            .expect("the key is a subgroup point");
         assert!(!signature::verify(
             &root_of(&store, AGORA_B),
-            |put| replayed.encode_parts(put),
+            &replayed,
             &sig
         ));
     }
@@ -369,32 +363,35 @@ mod tests {
     #[test]
     fn an_epoch_cert_binds_its_epoch_and_key() {
         let store = store();
-        let base = epoch_cert(&store, AGORA_A, 7, &[0xcc; 32]);
-        assert_ne!(base, epoch_cert(&store, AGORA_A, 8, &[0xcc; 32]));
-        assert_ne!(base, epoch_cert(&store, AGORA_A, 7, &[0xcd; 32]));
+        let base = epoch_cert(&store, AGORA_A, 7, &epoch_point(0xcc));
+        assert_ne!(base, epoch_cert(&store, AGORA_A, 8, &epoch_point(0xcc)));
+        assert_ne!(base, epoch_cert(&store, AGORA_A, 7, &epoch_point(0xcd)));
     }
 
     #[test]
     fn a_migration_cert_binds_its_agora_and_target() {
         let store = store();
-        let base = migration(&store, AGORA_A, &[0xee; 32]);
-        assert_ne!(base, migration(&store, AGORA_B, &[0xee; 32]));
-        assert_ne!(base, migration(&store, AGORA_A, &[0xef; 32]));
+        let base = migration(&store, AGORA_A, &epoch_point(0xee));
+        assert_ne!(base, migration(&store, AGORA_B, &epoch_point(0xee)));
+        assert_ne!(base, migration(&store, AGORA_A, &epoch_point(0xef)));
     }
 
-    /// Field boundaries must not be movable.
-    ///
-    /// The epoch is fixed-width, but the epoch public key is not, so without length framing
-    /// in the canonical payload a key whose leading bytes absorbed the neighbouring field
-    /// would produce a colliding certificate.
+    /// A payload whose key bytes name no subgroup point has no message and cannot be
+    /// signed — the serialization boundary of §9.1's cofactor clause, at the signer.
     #[test]
-    fn field_boundaries_are_not_malleable() {
+    fn a_non_point_key_is_refused() {
         let store = store();
-        let mut shifted = [0u8; 33];
-        shifted[1..].copy_from_slice(&[0xcc; 32]);
-        assert_ne!(
-            epoch_cert(&store, AGORA_A, 7, &[0xcc; 32]),
-            epoch_cert(&store, AGORA_A, 7, &shifted)
+        let mut sig = [0u8; signature::SIGNATURE_LEN];
+        assert_eq!(
+            store.sign_epoch_cert(
+                &EpochCertPayload {
+                    agora: AGORA_A,
+                    epoch: Epoch::new(7),
+                    epoch_public_key: &[0xff; 32],
+                },
+                &mut sig,
+            ),
+            Err(ProtocolError::Malformed)
         );
     }
 
@@ -411,7 +408,7 @@ mod tests {
             store.sign_migration(
                 &MigrationCertPayload {
                     agora: AGORA_A,
-                    successor_public_key: &[],
+                    successor_public_key: &epoch_point(0xee),
                 },
                 &mut short_sig,
             ),

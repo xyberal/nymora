@@ -139,7 +139,7 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
     pub fn revocation_keys(
         &self,
         access: &MemberAccess,
-    ) -> Result<impl Iterator<Item = &[u8; 32]>, ProtocolError> {
+    ) -> Result<impl Iterator<Item = [u8; 32]> + '_, ProtocolError> {
         self.admit(access)?;
         Ok(self.revocations.keys())
     }
@@ -153,7 +153,7 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
     pub fn spend_keys(
         &self,
         access: &MemberAccess,
-    ) -> Result<impl Iterator<Item = &[u8; 32]>, ProtocolError> {
+    ) -> Result<impl Iterator<Item = [u8; 32]> + '_, ProtocolError> {
         self.admit(access)?;
         Ok(self.spends.keys())
     }

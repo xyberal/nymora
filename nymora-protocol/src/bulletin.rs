@@ -163,7 +163,11 @@ pub fn accept_bulletin(
         return Err(ProtocolError::Malformed);
     }
     let digest = statement.digest();
-    if !signature::verify(statement_key, |absorb| absorb(&digest), signature) {
+    if !signature::verify(
+        statement_key,
+        &nymora_crypto::field::from_id(&digest),
+        signature,
+    ) {
         return Err(ProtocolError::Malformed);
     }
     Ok(())
@@ -187,8 +191,16 @@ pub fn bulletin_equivocation(
     let b_digest = b.digest();
     a.epoch == b.epoch
         && a_digest != b_digest
-        && signature::verify(statement_key, |absorb| absorb(&a_digest), a_signature)
-        && signature::verify(statement_key, |absorb| absorb(&b_digest), b_signature)
+        && signature::verify(
+            statement_key,
+            &nymora_crypto::field::from_id(&a_digest),
+            a_signature,
+        )
+        && signature::verify(
+            statement_key,
+            &nymora_crypto::field::from_id(&b_digest),
+            b_signature,
+        )
 }
 
 #[cfg(test)]
@@ -281,8 +293,8 @@ mod tests {
     /// tampered content, a wrong key, a stale epoch — refuses.
     #[test]
     fn acceptance_requires_signature_and_advance() {
-        let seed = [0x42; 32];
-        let statement_key = signature::public_key(&seed);
+        let seed = signature::mint_signing_secret([0x42; 32]);
+        let statement_key = signature::public_key(&seed).expect("minted keys are canonical");
         let class_roots = [(
             PolicyClass::from_bytes([0x01; 32]),
             Root::from_bytes([0x02; 32]),
@@ -292,7 +304,8 @@ mod tests {
         let witness_key = WitnessKey::new([0x07; 32]);
         let stated = statement(&class_roots, &revoked, &tag_key, &witness_key, None);
         let digest = stated.digest();
-        let signed = signature::sign(&seed, |absorb| absorb(&digest));
+        let signed = signature::sign(&seed, &nymora_crypto::field::from_id(&digest))
+            .expect("minted keys are canonical");
 
         assert!(accept_bulletin(&statement_key, &stated, &signed, None).is_ok());
         assert!(accept_bulletin(&statement_key, &stated, &signed, Some(Epoch::new(6))).is_ok());
@@ -307,7 +320,8 @@ mod tests {
         assert!(accept_bulletin(&statement_key, &tampered, &signed, None).is_err());
 
         // A key the member never pinned refuses.
-        let wrong_key = signature::public_key(&[0x43; 32]);
+        let wrong_key = signature::public_key(&signature::mint_signing_secret([0x43; 32]))
+            .expect("minted keys are canonical");
         assert!(accept_bulletin(&wrong_key, &stated, &signed, None).is_err());
     }
 
@@ -315,8 +329,8 @@ mod tests {
     /// nothing weaker.
     #[test]
     fn equivocation_requires_two_valid_signatures_on_divergent_content() {
-        let seed = [0x42; 32];
-        let statement_key = signature::public_key(&seed);
+        let seed = signature::mint_signing_secret([0x42; 32]);
+        let statement_key = signature::public_key(&seed).expect("minted keys are canonical");
         let class_roots = [(
             PolicyClass::from_bytes([0x01; 32]),
             Root::from_bytes([0x02; 32]),
@@ -327,10 +341,10 @@ mod tests {
         let witness_key = WitnessKey::new([0x07; 32]);
         let a = statement(&class_roots, &revoked, &tag_key, &witness_key, None);
         let b = statement(&class_roots, &revoked, &other_tag, &witness_key, None);
-        let a_digest = a.digest();
-        let b_digest = b.digest();
-        let a_sig = signature::sign(&seed, |absorb| absorb(&a_digest));
-        let b_sig = signature::sign(&seed, |absorb| absorb(&b_digest));
+        let a_sig = signature::sign(&seed, &nymora_crypto::field::from_id(&a.digest()))
+            .expect("minted keys are canonical");
+        let b_sig = signature::sign(&seed, &nymora_crypto::field::from_id(&b.digest()))
+            .expect("minted keys are canonical");
 
         assert!(bulletin_equivocation(
             &statement_key,

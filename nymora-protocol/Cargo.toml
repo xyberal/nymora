@@ -11,32 +11,11 @@ publish.workspace = true
 workspace = true
 
 [features]
-default = ["provisional-algebraic-hash"]
-# Forwards the stand-ins through the whole proof stack. The lifecycle operations that
-# recompute a leaf or derive a nullifier, and the witness-assembly path into the statement
-# types, sit behind this; the sequencing that does not (epoch rollover, sweeps, records)
-# compiles without it.
-provisional-algebraic-hash = [
-    "nymora-crypto/provisional-algebraic-hash",
-    "nymora-accumulator/provisional-algebraic-hash",
-    "nymora-circuits/provisional-algebraic-hash",
-    "nymora-proofs/provisional-algebraic-hash",
-]
-# The member-side bulletin verifier (§11, proposal 0024). A member accepts a boundary
-# bulletin only under the operator statement key, and verifying that signature needs the
-# signature scheme — nothing else about a member build does, so the module sits behind
-# its own feature rather than in the default set.
-provisional-signature = ["nymora-crypto/provisional-signature"]
 # The Skiora role (§2.1): agora state, vouch sessions, quorum decisions, verification
 # access, migration acceptance, and the transparency log. Off by default so the member
-# side stays allocation-free — the operator needs collections (an allocator) and, for log
-# heads and bulletin signing, the provisional signature. A conformant Skiora wraps this;
-# a Persora never enables it.
-operator = [
-    "provisional-algebraic-hash",
-    "provisional-signature",
-    "nymora-accumulator/build",
-]
+# side stays allocation-free — the operator needs collections (an allocator). A
+# conformant Skiora wraps this; a Persora never enables it.
+operator = ["nymora-accumulator/build"]
 
 [dependencies]
 nymora-core = { path = "../nymora-core" }
@@ -52,9 +31,6 @@ zeroize = { version = "1", default-features = false }
 nymora-ports = { path = "../nymora-ports", features = ["software-key-store"] }
 # The cross-phase tests sign epoch certificates the stub verifies, build the trees and
 # sets proofs are cut against, and prove through the stub backend.
-nymora-crypto = { path = "../nymora-crypto", default-features = false, features = [
-    "provisional-signature",
-] }
 nymora-accumulator = { path = "../nymora-accumulator", default-features = false, features = [
     "build",
 ] }

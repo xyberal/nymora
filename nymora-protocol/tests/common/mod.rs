@@ -12,8 +12,8 @@ use nymora_circuits::{ChainWitness, ProofSystem, StubProver};
 use nymora_core::{
     AgoraId, Commitment, Epoch, Nullifier, PolicyClass, ProtocolError, TagKey, WitnessKey,
 };
+use nymora_crypto::nullifier;
 use nymora_crypto::signature::PUBLIC_KEY_LEN;
-use nymora_crypto::{nullifier, signature};
 use nymora_ports::{SecureStorage, Slot, SoftwareKeyStore};
 use nymora_proofs::{prove_policy_approval, prove_vouch, EpochRoots};
 use nymora_protocol::operator::{AgoraState, Bulletin, ClassPolicy, Founding, SessionId};
@@ -61,10 +61,15 @@ impl SecureStorage for TestStore {
     }
 }
 
+/// The accumulator depth most tests share; the exhaustion tests use their own. Trees
+/// and exclusion sets alike carry it now that both are positional (proposal 0035).
+pub const DEPTH: usize = 4;
+
 /// A member of one agora: stored credential material plus the local copies a Persora
 /// keeps — the exclusion sets rebuilt from bulletins, the tag keys received from
-/// broadcasts.
-pub struct Member {
+/// broadcasts. `D` is the agora's accumulator depth, which the member's own set copies
+/// share.
+pub struct Member<const D: usize> {
     pub seed: u8,
     pub agora: AgoraId,
     pub class: PolicyClass,
@@ -72,8 +77,8 @@ pub struct Member {
     pub store: TestStore,
     pub leaf: Commitment,
     pub position: u64,
-    pub revocations: ExclusionSet,
-    pub spends: ExclusionSet,
+    pub revocations: ExclusionSet<D>,
+    pub spends: ExclusionSet<D>,
     pub tag_keys: Vec<(Epoch, TagKey)>,
     /// The epoch's roots, as the bulletin delivered them (proposal 0025) — a member
     /// holds no other source for them.
@@ -87,7 +92,7 @@ pub struct Member {
     pub epoch: Option<Epoch>,
 }
 
-impl Member {
+impl<const D: usize> Member<D> {
     /// Creates the credential and certifies it at `epoch`.
     ///
     /// The seed drives every piece of entropy, so feeding one seed into two agoras is the
@@ -127,10 +132,9 @@ impl Member {
         member
     }
 
-    /// Rolls to `epoch` with a per-member, per-epoch keypair.
+    /// Rolls to `epoch` with a per-member, per-epoch key.
     pub fn roll(&mut self, epoch: Epoch) {
         let epoch_seed = [self.seed.wrapping_add(epoch.get() as u8); 32];
-        let public_key = signature::public_key(&epoch_seed);
         let mut record = [0u8; 256];
         nymora_protocol::roll_epoch(
             self.agora,
@@ -138,7 +142,6 @@ impl Member {
             &mut self.store,
             epoch,
             FreshEntropy::new(epoch_seed),
-            &public_key,
             &mut record,
         )
         .expect("rollover succeeds");
@@ -204,7 +207,7 @@ impl Member {
 
     /// Assembles the full chain witness from stored material plus operator-served
     /// inclusion, and hands it to `f` — the closure keeps the borrows honest.
-    pub fn acting<R, const D: usize>(
+    pub fn acting<R>(
         &self,
         op: &AgoraState<StubProver, D>,
         f: impl FnOnce(&ChainWitness<'_, D>, Epoch, &EpochRoots) -> R,
@@ -227,7 +230,7 @@ impl Member {
     }
 
     /// One vouch attestation into a session (§5.3).
-    pub fn vouch<const D: usize>(
+    pub fn vouch(
         &self,
         op: &AgoraState<StubProver, D>,
         session: SessionId,
@@ -247,7 +250,7 @@ impl Member {
 
     /// One approval of a quorum subject (§4.3, proposal 0021) — recomputing the subject
     /// from the served proposal first, as every honest member must.
-    pub fn approve<const D: usize>(&self, op: &mut AgoraState<StubProver, D>, subject: SubjectId) {
+    pub fn approve(&self, op: &mut AgoraState<StubProver, D>, subject: SubjectId) {
         let view = op.proposal(&subject).expect("proposal is open");
         let recomputed = subject_id(
             self.agora,
@@ -279,7 +282,7 @@ impl Member {
 /// Founds an agora with `founder` and one self-vouching class, as in §4:
 /// `Root_voucher_eligible` is the member class while its members are the vouchers.
 pub fn found<const D: usize>(
-    founder: &mut Member,
+    founder: &mut Member<D>,
     tag_seed: u8,
     log_seed: Option<u8>,
 ) -> AgoraState<StubProver, D> {
@@ -316,8 +319,8 @@ pub fn found<const D: usize>(
 /// Admits `candidate` through a full vouch session, `vouchers` attesting (§5.3).
 pub fn admit<const D: usize>(
     op: &mut AgoraState<StubProver, D>,
-    candidate: &mut Member,
-    vouchers: &[&Member],
+    candidate: &mut Member<D>,
+    vouchers: &[&Member<D>],
     id_seed: u8,
 ) {
     op.credentials_init(candidate.leaf).expect("init records");
@@ -336,7 +339,7 @@ pub fn admit<const D: usize>(
 
 /// Advances the boundary and delivers the bulletin to `members` — and, pointedly, to
 /// nobody else.
-pub fn advance<const D: usize>(op: &mut AgoraState<StubProver, D>, members: &mut [&mut Member]) {
+pub fn advance<const D: usize>(op: &mut AgoraState<StubProver, D>, members: &mut [&mut Member<D>]) {
     let bulletin = op.advance_epoch().expect("boundary advances");
     for member in members {
         member.apply_bulletin(&bulletin);

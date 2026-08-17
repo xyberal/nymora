@@ -28,14 +28,13 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Test
         run: cargo test --all-features --workspace
-      # --all-features would never exercise the build that omits the stand-in algebraic
-      # hash, which is the configuration to check against before shipping.
-      - name: Test without the provisional algebraic hash
-        run: cargo test -p nymora-crypto --no-default-features
-      - name: Test the lifecycle without the provisional algebraic hash
-        run: cargo test -p nymora-protocol --no-default-features
-      - name: Test the proof layer without the stand-ins
+      # --all-features alone would never exercise the member-shaped builds: no
+      # allocator in the accumulator, no operator role, no stub backend. Those are
+      # the configurations a Persora actually compiles.
+      - name: Test the member-shaped builds
         run: |
+          cargo test -p nymora-crypto --no-default-features
+          cargo test -p nymora-protocol --no-default-features
           cargo test -p nymora-circuits --no-default-features
           cargo test -p nymora-proofs --no-default-features
           cargo test -p nymora-accumulator --no-default-features
@@ -50,6 +49,21 @@ jobs:
           cargo test --release
       - name: License headers
         run: ./scripts/check-license-headers.sh
+
+  audit:
+    # Dependency advisories (RustSec), for the workspace and the proving backend
+    # alike. A new advisory fails this job without blocking unrelated work in
+    # build-test — the split is deliberate.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Audit the workspace
+        run: cargo audit
+      - name: Audit the proving backend
+        run: cd nymora-plonk && cargo audit
 
   secret-scan:
     runs-on: ubuntu-latest

@@ -34,7 +34,7 @@
 //! domain tag, because the real transcript encoding belongs to the proving system and
 //! pinning a stand-in here would be pinning the one thing this backend must leave open.
 //!
-//! Sizes follow the provisional schemes and are unpinned by every test; the proof types
+//! Sizes follow the real schemes' constants; the proof types
 //! redact themselves in `Debug` like the secrets they contain.
 
 use crate::statement::{
@@ -42,10 +42,7 @@ use crate::statement::{
 };
 use crate::system::ProofSystem;
 use nymora_accumulator::{verifies, verifies_absent, AbsenceWitness, Witness};
-use nymora_core::{
-    CredentialKey, EpochCertPayload, EpochSecretKey, MigrationCertPayload, ProtocolError,
-    RootOpening,
-};
+use nymora_core::{CredentialKey, EpochSecretKey, ProtocolError, RootOpening};
 use nymora_crypto::signature::{PUBLIC_KEY_LEN, SIGNATURE_LEN};
 use nymora_crypto::{commit, live_auth, nullifier, signature};
 use sha2::{Digest, Sha256};
@@ -140,8 +137,8 @@ pub struct StubProof<const DEPTH: usize> {
     root_opening: RootOpening,
     root_public_key: [u8; PUBLIC_KEY_LEN],
     leaf_witness: Witness<DEPTH>,
-    revocation_absence: AbsenceWitness,
-    spend_absence: AbsenceWitness,
+    revocation_absence: AbsenceWitness<DEPTH>,
+    spend_absence: AbsenceWitness<DEPTH>,
 }
 
 impl<const DEPTH: usize> core::fmt::Debug for StubProof<DEPTH> {
@@ -162,7 +159,7 @@ pub struct MigrationStubProof<const DEPTH: usize> {
     migration_cert_signature: [u8; SIGNATURE_LEN],
     successor_public_key: [u8; PUBLIC_KEY_LEN],
     successor_opening: RootOpening,
-    revocation_absence: AbsenceWitness,
+    revocation_absence: AbsenceWitness<DEPTH>,
 }
 
 impl<const DEPTH: usize> core::fmt::Debug for MigrationStubProof<DEPTH> {
@@ -182,33 +179,42 @@ fn chain_holds<const DEPTH: usize>(
     public: &ChainPublicInputs<'_>,
 ) -> bool {
     // pk_epoch is the public counterpart of sk_epoch — without this the certificate
-    // constrains nothing about the key the nullifier derives from (§9.1).
-    if signature::public_key(witness.epoch_key.expose()).as_slice() != witness.epoch_public_key {
-        return false;
+    // constrains nothing about the key the nullifier derives from (§9.1). The same call
+    // enforces the canonicity clause: a non-canonical key representation derives no
+    // public key here, exactly as it satisfies no statement in-circuit (proposal 0035),
+    // because its second byte form would otherwise mint a second nullifier stream.
+    match signature::public_key(witness.epoch_key.expose()) {
+        Some(pk) if pk.as_slice() == witness.epoch_public_key => {}
+        _ => return false,
     }
 
     // epoch_cert verifies over pk_epoch by pk_root, for exactly this agora and epoch —
-    // the payload is reconstructed from statement inputs, never taken from the prover.
-    let cert = EpochCertPayload {
-        agora: public.agora,
-        epoch: public.epoch,
-        epoch_public_key: witness.epoch_public_key,
+    // the message is reconstructed from statement inputs, never taken from the prover
+    // (§9.1: the Poseidon compression of the canonical payload).
+    let Some(message) =
+        signature::epoch_cert_message(&public.agora, public.epoch, witness.epoch_public_key)
+    else {
+        return false;
     };
     if !signature::verify(
         witness.root_public_key,
-        |put| cert.encode_parts(put),
+        &message,
         witness.epoch_cert_signature,
     ) {
         return false;
     }
 
     // sk_cred and r_root open the committed leaf, and that leaf sits under the class root.
-    let leaf = commit(
+    // A root key that names no subgroup point commits to nothing — the serialization
+    // boundary of §9.1's cofactor clause.
+    let Some(leaf) = commit(
         witness.root_public_key,
         witness.credential_key,
         witness.root_opening,
         &public.agora,
-    );
+    ) else {
+        return false;
+    };
     if !verifies(&leaf, witness.leaf_witness, &public.class_root) {
         return false;
     }
@@ -256,12 +262,14 @@ fn migration_holds<const DEPTH: usize>(
     public: &MigrationPublicInputs,
 ) -> bool {
     // The old leaf opens with the carried sk_cred and sits under the class root.
-    let old_leaf = commit(
+    let Some(old_leaf) = commit(
         witness.old_root_public_key,
         witness.credential_key,
         witness.old_root_opening,
         &public.agora,
-    );
+    ) else {
+        return false;
+    };
     if !verifies(&old_leaf, witness.old_leaf_witness, &public.class_root) {
         return false;
     }
@@ -282,15 +290,16 @@ fn migration_holds<const DEPTH: usize>(
         return false;
     }
 
-    // The old root authorized exactly this successor (§9.3) — payload reconstructed, not
-    // supplied.
-    let cert = MigrationCertPayload {
-        agora: public.agora,
-        successor_public_key: witness.successor_public_key,
+    // The old root authorized exactly this successor (§9.3) — the message reconstructed,
+    // not supplied.
+    let Some(message) =
+        signature::migration_cert_message(&public.agora, witness.successor_public_key)
+    else {
+        return false;
     };
     if !signature::verify(
         witness.old_root_public_key,
-        |put| cert.encode_parts(put),
+        &message,
         witness.migration_cert_signature,
     ) {
         return false;
@@ -298,13 +307,12 @@ fn migration_holds<const DEPTH: usize>(
 
     // The successor commitment carries the same sk_cred — the clause that stops migration
     // laundering its own nullifier (§9.3).
-    public.successor_commitment
-        == commit(
-            witness.successor_public_key,
-            witness.credential_key,
-            witness.successor_opening,
-            &public.agora,
-        )
+    commit(
+        witness.successor_public_key,
+        witness.credential_key,
+        witness.successor_opening,
+        &public.agora,
+    ) == Some(public.successor_commitment)
 }
 
 /// Copies a scheme-width slice, or reports the caller's input unusable for this backend.
@@ -416,8 +424,8 @@ mod tests {
     use crate::system::ProofSystem;
     use nymora_accumulator::{AbsenceWitness, ExclusionSet, Tree, Witness};
     use nymora_core::{
-        AgoraId, Commitment, CredentialKey, Epoch, EpochCertPayload, EpochSecretKey, MessageHash,
-        MigrationCertPayload, ProtocolError, Root, RootOpening, SessionContext,
+        AgoraId, Commitment, CredentialKey, Epoch, EpochSecretKey, MessageHash, ProtocolError,
+        Root, RootOpening, SessionContext,
     };
     use nymora_crypto::signature::{PUBLIC_KEY_LEN, SIGNATURE_LEN};
     use nymora_crypto::{commit, live_auth, nullifier, signature};
@@ -426,8 +434,17 @@ mod tests {
     const AGORA_A: AgoraId = AgoraId::from_bytes([0x01; 32]);
     const AGORA_B: AgoraId = AgoraId::from_bytes([0x02; 32]);
     const EPOCH: u64 = 7;
-    const ROOT_SEED: [u8; 32] = [0x0a; 32];
-    const EPOCH_SEED: [u8; 32] = [0x0d; 32];
+    // Canonical Jubjub scalars by construction — the minting rule of proposal 0035.
+    const ROOT_SEED: [u8; 32] = {
+        let mut b = [0x0a; 32];
+        b[31] &= 0x07;
+        b
+    };
+    const EPOCH_SEED: [u8; 32] = {
+        let mut b = [0x0d; 32];
+        b[31] &= 0x07;
+        b
+    };
 
     /// Everything a member holds when producing an ordinary proof, owned so the borrowed
     /// witness and public-input views can be cut from it per test.
@@ -440,8 +457,8 @@ mod tests {
         root_public_key: [u8; PUBLIC_KEY_LEN],
         leaf: Commitment,
         leaf_witness: Witness<DEPTH>,
-        revocation_absence: AbsenceWitness,
-        spend_absence: AbsenceWitness,
+        revocation_absence: AbsenceWitness<DEPTH>,
+        spend_absence: AbsenceWitness<DEPTH>,
         class_root: Root,
         revocation_root: Root,
         spend_root: Root,
@@ -452,11 +469,14 @@ mod tests {
     }
 
     /// Builds the fixture, letting a test poison the exclusion sets first.
-    fn fixture_with(mutate: impl FnOnce(&mut ExclusionSet, &mut ExclusionSet)) -> Fixture {
-        let root_public_key = signature::public_key(&ROOT_SEED);
+    fn fixture_with(
+        mutate: impl FnOnce(&mut ExclusionSet<DEPTH>, &mut ExclusionSet<DEPTH>),
+    ) -> Fixture {
+        let root_public_key = signature::public_key(&ROOT_SEED).expect("canonical seed");
         let credential_key = CredentialKey::new([0x0b; 32]);
         let root_opening = RootOpening::new([0x0c; 32]);
-        let leaf = commit(&root_public_key, &credential_key, &root_opening, &AGORA_A);
+        let leaf = commit(&root_public_key, &credential_key, &root_opening, &AGORA_A)
+            .expect("the root key is a subgroup point");
 
         let mut tree = Tree::<DEPTH>::new();
         tree.append(Commitment::from_bytes([0xf0; 32]))
@@ -470,13 +490,10 @@ mod tests {
         let spend = nullifier::migration(&credential_key, &leaf, &AGORA_A);
 
         let epoch_key = EpochSecretKey::new(EPOCH_SEED);
-        let epoch_public_key = signature::public_key(&EPOCH_SEED);
-        let cert = EpochCertPayload {
-            agora: AGORA_A,
-            epoch: Epoch::new(EPOCH),
-            epoch_public_key: &epoch_public_key,
-        };
-        let epoch_cert_signature = signature::sign(&ROOT_SEED, |put| cert.encode_parts(put));
+        let epoch_public_key = signature::public_key(&EPOCH_SEED).expect("canonical seed");
+        let message = signature::epoch_cert_message(&AGORA_A, Epoch::new(EPOCH), &epoch_public_key)
+            .expect("the epoch key is a subgroup point");
+        let epoch_cert_signature = signature::sign(&ROOT_SEED, &message).expect("canonical seed");
 
         Fixture {
             epoch_key,
@@ -591,11 +608,12 @@ mod tests {
             // The leaf is deterministic from the fixture's constants, so it can be
             // recomputed here before the fixture exists.
             let leaf = commit(
-                &signature::public_key(&ROOT_SEED),
+                &signature::public_key(&ROOT_SEED).expect("canonical seed"),
                 &CredentialKey::new([0x0b; 32]),
                 &RootOpening::new([0x0c; 32]),
                 &AGORA_A,
-            );
+            )
+            .expect("the root key is a subgroup point");
             revocations.insert(*leaf.as_bytes());
         });
         assert_eq!(
@@ -612,11 +630,12 @@ mod tests {
         let fixture = fixture_with(|_, spends| {
             let credential_key = CredentialKey::new([0x0b; 32]);
             let leaf = commit(
-                &signature::public_key(&ROOT_SEED),
+                &signature::public_key(&ROOT_SEED).expect("canonical seed"),
                 &credential_key,
                 &RootOpening::new([0x0c; 32]),
                 &AGORA_A,
-            );
+            )
+            .expect("the root key is a subgroup point");
             spends.insert(*nullifier::migration(&credential_key, &leaf, &AGORA_A).as_bytes());
         });
         assert_eq!(
@@ -714,14 +733,14 @@ mod tests {
     #[test]
     fn migration_proves_and_verifies() {
         let fixture = fixture();
-        let successor_seed = [0x1a; 32];
-        let successor_public_key = signature::public_key(&successor_seed);
+        let successor_seed = signature::mint_signing_secret([0x1a; 32]);
+        let successor_public_key =
+            signature::public_key(&successor_seed).expect("minted keys are canonical");
         let successor_opening = RootOpening::new([0x1b; 32]);
-        let cert = MigrationCertPayload {
-            agora: AGORA_A,
-            successor_public_key: &successor_public_key,
-        };
-        let migration_cert_signature = signature::sign(&ROOT_SEED, |put| cert.encode_parts(put));
+        let message = signature::migration_cert_message(&AGORA_A, &successor_public_key)
+            .expect("the successor key is a subgroup point");
+        let migration_cert_signature =
+            signature::sign(&ROOT_SEED, &message).expect("canonical seed");
 
         let witness = MigrationWitness {
             old_root_public_key: &fixture.root_public_key,
@@ -743,7 +762,8 @@ mod tests {
                 &fixture.credential_key,
                 &successor_opening,
                 &AGORA_A,
-            ),
+            )
+            .expect("the successor key is a subgroup point"),
         };
 
         let proof = StubProver
@@ -759,7 +779,8 @@ mod tests {
                 &CredentialKey::new([0x77; 32]),
                 &successor_opening,
                 &AGORA_A,
-            ),
+            )
+            .expect("the successor key is a subgroup point"),
             ..public
         };
         assert_eq!(

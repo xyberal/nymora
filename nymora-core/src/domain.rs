@@ -45,7 +45,11 @@ domains! {
     /// Derivation of an agora's self-generated identifier from its public parameters (§3).
     AgoraId => "nymora/v0/agora-id",
 
-    /// The accumulator leaf commitment, `Commit(pk_root, sk_cred, r_root, agora_id)` (§9.1).
+    /// The accumulator leaf commitment (§9.1).
+    ///
+    /// Reserved: the commitment derives under the field-domain registry below —
+    /// `Poseidon(LEAF, ...)` — since proposal 0035. Registered permanently, like every
+    /// retired name.
     Commitment => "nymora/v0/commitment",
 
     /// Derivation of a policy class identifier from its agora and label (§5.2).
@@ -56,47 +60,47 @@ domains! {
 
     /// Hashing a value into an accumulator leaf (§5.2).
     ///
-    /// Distinct from [`Domain::AccumulatorNode`], and the distinction is the point. Without
-    /// it, a fixed-depth tree admits the standard Merkle second-preimage substitution: an
-    /// interior node, which is itself a hash of two children, is presented as a leaf, and an
-    /// inclusion proof for it verifies. Two tags make the two positions unforgeable for each
-    /// other.
-    ///
-    /// The accumulator hashes whatever value it is given rather than relying on that value
-    /// already being domain-separated. A credential leaf is a [`Domain::Commitment`] and would
-    /// be safe on its own, but the accumulator is generic over what it holds — §11's
-    /// revocation set is a second instance — and its safety must not depend on the provenance
-    /// of its contents.
+    /// Reserved: the fold is the untagged 2-to-1 Poseidon since proposal 0035, with a
+    /// leaf entering as itself — the leaf/node separation these two tags carried is now
+    /// carried by arity, which the pinned sponge writes into its capacity element.
     AccumulatorLeaf => "nymora/v0/accumulator/leaf",
 
-    /// Hashing two children into an interior accumulator node (§5.2).
+    /// Hashing two children into an interior accumulator node (§5.2). Reserved — see
+    /// [`Domain::AccumulatorLeaf`].
     AccumulatorNode => "nymora/v0/accumulator/node",
 
     /// Hashing an excluded key into a leaf of an exclusion set (§9.1, §11).
     ///
     /// The revocation set and the migration-spend set are keyed accumulators supporting
-    /// non-membership witnesses — normative in §9.1's currency clauses, though the tree
-    /// structure computing them is provisional until the real circuit lands (its hash is
-    /// the pinned Poseidon instance of §6.5; proposals 0033, 0034).
-    /// The tags name the *context*, which survives whatever structure arrives. Distinct from
-    /// [`Domain::AccumulatorLeaf`] for the same substitution reasons, and additionally so a
-    /// membership path and a non-membership path can never be confused for each other.
+    /// non-membership witnesses — §9.1's currency clauses.
+    ///
+    /// Reserved: the exclusion sets are gap trees over the field-domain registry below
+    /// (proposal 0035), so this byte-family tag no longer leads any derivation. It stays
+    /// registered because the registry is permanent — removing and later re-adding a name
+    /// would be indistinguishable from a redefinition.
     ExclusionLeaf => "nymora/v0/exclusion/leaf",
 
-    /// Hashing two children into an interior exclusion-set node (§9.1, §11).
+    /// Hashing two children into an interior exclusion-set node (§9.1, §11). Reserved —
+    /// see [`Domain::ExclusionLeaf`].
     ExclusionNode => "nymora/v0/exclusion/node",
 
     /// The one-time certificate authorizing migration to new hardware (§9.3).
     ///
-    /// Distinct from [`Domain::EpochCertificate`]: both are signed by `sk_root`, and a
-    /// migration certificate accepted as an epoch certificate — or the reverse — would let one
-    /// authorization stand in for the other.
+    /// Reserved: certificate messages compress under the field domains below since
+    /// proposal 0035 — the separation the two byte tags carried (one authorization must
+    /// not stand in for the other, despite the shared signing key) is now carried by
+    /// distinct field-domain constants inside the compressed message.
     MigrationCertificate => "nymora/v0/migration-cert",
 
-    /// The payload an epoch certificate signs over (§9.1).
+    /// The payload an epoch certificate signs over (§9.1). Reserved — see
+    /// [`Domain::MigrationCertificate`].
     EpochCertificate => "nymora/v0/epoch-cert",
 
     /// Nullifier scoping a vouching attestation to one session (§5.3).
+    ///
+    /// Reserved: every nullifier derives under the one tagged action derivation of the
+    /// field-domain registry since proposal 0035 — the per-context separation these four
+    /// tags carried is one absorbed element deep in that single hash.
     NullifierVouch => "nymora/v0/nullifier/vouch",
 
     /// Nullifier binding an attestation to one message within one agora (§6.1).
@@ -107,13 +111,15 @@ domains! {
     /// duplicate is rejected without a separate check. The guarantee is same-epoch only —
     /// the key is destroyed when its epoch ends (§9.1), so a later self-corroboration
     /// would derive fresh — which is one strand of why corroboration is deferred rather
-    /// than shipped (§6.3, proposal 0005).
+    /// than shipped (§6.3, proposal 0005). Reserved — see [`Domain::NullifierVouch`].
     NullifierAttestation => "nymora/v0/nullifier/attestation",
 
     /// Nullifier enforcing one approval per credential on a policy proposal (§4.3).
+    /// Reserved — see [`Domain::NullifierVouch`].
     NullifierPolicy => "nymora/v0/nullifier/policy",
 
-    /// Nullifier consuming the old leaf during device migration (§9.3).
+    /// Nullifier consuming the old leaf during device migration (§9.3). Reserved — the
+    /// spend derives under the `SPEND` field domain (proposal 0035).
     NullifierMigration => "nymora/v0/nullifier/migration",
 
     /// A participant's commitment in the live-authentication commit-reveal round (§8.1).
@@ -122,7 +128,8 @@ domains! {
     /// The jointly-derived session context for a live exchange (§8.1).
     LiveAuthContext => "nymora/v0/live-auth/context",
 
-    /// A participant's per-session pseudonym (§8.1).
+    /// A participant's per-session pseudonym (§8.1). Reserved — the pseudonym is the
+    /// tagged action derivation at its own tag (proposal 0035).
     LiveAuthPseudonym => "nymora/v0/live-auth/pseudonym",
 
     /// The short authentication string compared aloud in person (§8.3).
@@ -188,6 +195,65 @@ domains! {
     ///
     /// Reserved: deferred with the ledger (proposal 0010).
     LedgerHeadHandle => "nymora/v0/ledger/head-handle",
+
+    /// Byte-family compression of a variable-length action identifier before it enters
+    /// the field (§6.5, proposal 0035).
+    ///
+    /// Session, proposal, and challenge identifiers are opaque bytes of any length; the
+    /// circuit absorbs one field element per context. This domain is the crossing: the
+    /// identifier is hashed here, length-framed as always, and the digest enters the
+    /// field by the truncation rule of proposal 0035.
+    ActionContext => "nymora/v0/action-context",
+}
+
+/// The field-domain registry: the constants leading every derivation the standardized
+/// circuit recomputes (§6.5, proposal 0035).
+///
+/// The string registry above serves the byte family, where a tag is framed bytes; inside
+/// the circuit a domain is one absorbed field element, and these are their values —
+/// permanent for the same reason the string registry is. Zero is never a domain: it is
+/// the padding and empty-subtree value. Two derivations are deliberately untagged and
+/// pinned by arity instead — the 2-to-1 accumulator node and the certificate transcript
+/// challenge (§9.1) — which the pinned sponge keeps disjoint from every tagged
+/// derivation by writing the input length into its capacity element.
+pub mod field_domain {
+    /// The credential leaf commitment, `Poseidon(LEAF, pk.x, pk.y, sk_cred, r_root,
+    /// agora)` (§9.1).
+    pub const LEAF: u64 = 1;
+    /// An exclusion-set gap leaf, `Poseidon(GAP, low, high)` (§9.1, §11).
+    pub const GAP: u64 = 2;
+    /// The uniform action derivation, `Poseidon(ACTION, tag, key, context, agora)`
+    /// (§9.1, proposal 0035).
+    pub const ACTION: u64 = 3;
+    /// The epoch-certificate message, `Poseidon(EPOCH_CERT, agora, epoch, pk_epoch.x,
+    /// pk_epoch.y)` (§9.1).
+    pub const EPOCH_CERT: u64 = 4;
+    /// The migration-certificate message, `Poseidon(MIGRATION_CERT, agora,
+    /// pk_root_new.x, pk_root_new.y)` (§9.3).
+    pub const MIGRATION_CERT: u64 = 5;
+    /// The migration spend nullifier, `Poseidon(SPEND, sk_cred, leaf, agora)` (§9.3).
+    pub const SPEND: u64 = 6;
+    /// The certificate scheme's deterministic nonce, `k = reduce(Poseidon(NONCE, sk,
+    /// m))` (§9.1). Signer-local by nature, registered because two implementations must
+    /// still agree on it for vectors to reproduce.
+    pub const NONCE: u64 = 7;
+
+    /// The action tags absorbed by the [`ACTION`] derivation — in-band, constrained by
+    /// the statement, and what keeps one action's output unreplayable as another's
+    /// (proposal 0035).
+    pub mod action_tag {
+        /// Authorship (§6.1): keyed by `sk_epoch`, so attribution expires with the key.
+        pub const AUTHORSHIP: u64 = 0;
+        /// Vouching (§5.3): keyed by `sk_cred`, because it is a count.
+        pub const VOUCH: u64 = 1;
+        /// Policy approval (§4.3): keyed by `sk_cred`, because it is a count.
+        pub const POLICY: u64 = 2;
+        /// Live authentication (§8.1): keyed by `sk_epoch`, scoped to the session.
+        pub const LIVE_AUTH: u64 = 3;
+        /// Verification access (§7): derives nothing — the output is constrained to
+        /// zero (proposals 0019, 0035).
+        pub const VERIFICATION: u64 = 4;
+    }
 }
 
 #[cfg(test)]

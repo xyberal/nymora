@@ -4,60 +4,47 @@
 //!
 //! # Two hash families, both permanent
 //!
-//! It is tempting to treat a conventional hash here as a placeholder until a
-//! zero-knowledge-friendly one is chosen. That is the wrong model: the design needs both,
-//! indefinitely, and they answer to different constraints.
+//! The design needs both, indefinitely, and they answer to different constraints:
 //!
 //! - **The byte family** — used wherever a value never enters a circuit. Routing tags are
 //!   specified as an HMAC (§6.4); receipt-ledger chaining is client-side (§10.2); the
 //!   short authentication string is read aloud by people (§8.3). None of these is
-//!   constrained by a proving system, so the choice can be made now, and is: **SHA-256**,
-//!   which is hardware-accelerated on the arm64 devices Persora targets.
+//!   constrained by a proving system: **SHA-256**, hardware-accelerated on the arm64
+//!   devices Persora targets, with the framing and domain separation of [`Hasher`].
 //! - **The algebraic family** — used for values a circuit must recompute: nullifiers,
-//!   accumulator nodes, commitments. Its cost is measured in constraints rather than
-//!   cycles, and the right choice depends on the proving system, which is deliberately not
-//!   yet decided. It arrives with the circuit.
+//!   accumulator nodes, commitments, certificate messages. This is **Poseidon over the
+//!   BLS12-381 scalar field** in the pinned instance of §6.5 (proposals 0033, 0034),
+//!   implemented in [`poseidon`] as the circuit's CPU twin. Its domains are one absorbed
+//!   field element from the registry in `nymora-core`, its inputs are field elements,
+//!   and framing has no meaning there — arity is identity.
 //!
-//! Both inherit the framing and domain separation in [`Hasher`] (use the [`ByteHasher`]
-//! alias for the byte family), so that a value produced
-//! in one context can never be reinterpreted as a value produced in another, and so that
-//! two implementations cannot disagree about where one absorbed field ends and the next
-//! begins.
+//! The two families meet in exactly one place: [`field`], the crossing where protocol
+//! bytes become field elements under proposal 0035's rules. Variable-length identifiers
+//! are compressed by the byte family *before* they cross, which is how the byte family's
+//! framing guarantee protects derivations the circuit computes.
 //!
-//! The proving system is chosen — Plonkish KZG over BLS12-381, with Poseidon as the
-//! algebraic hash, pinned at instance level (§6.5; proposals 0033, 0034) — but until the
-//! real circuit lands, the algebraic
-//! family remains a documented stand-in behind
-//! the `provisional-algebraic-hash` feature, on by default; see [`algebraic`] for what that
-//! means and what it would cost to ship. The root-authority signature scheme sits on the
-//! same fault line — both certificates are verified inside the circuit (§9.1, §9.3) — and
-//! is likewise a stand-in, behind `provisional-signature`; see [`signature`]. Building with
-//! `--no-default-features` removes both stand-ins and everything derived through them —
-//! [`commit`], [`nullifier`], and [`signature`] — leaving only the constructions that are
-//! settled.
+//! The certificate scheme sits with the algebraic family for the same reason it exists
+//! at all — both certificates are verified inside the circuit (§9.1, §9.3) — and is
+//! EdDSA over Jubjub with a Poseidon transcript, stated as an equation in §9.1 and
+//! implemented in [`signature`].
 
 #![no_std]
 
 pub mod agora_id;
-#[cfg(feature = "provisional-algebraic-hash")]
-pub mod algebraic;
-#[cfg(feature = "provisional-algebraic-hash")]
 pub mod commit;
+pub mod field;
 pub mod hash;
 pub mod kdf;
 pub mod live_auth;
-#[cfg(feature = "provisional-algebraic-hash")]
 pub mod nullifier;
 pub mod policy_class;
-#[cfg(feature = "provisional-signature")]
+pub mod poseidon;
 pub mod signature;
 pub mod tag;
 pub mod witness_key;
 
-#[cfg(feature = "provisional-algebraic-hash")]
-pub use algebraic::{AlgebraicHasher, ProvisionalAlgebraicBackend};
-#[cfg(feature = "provisional-algebraic-hash")]
 pub use commit::commit;
+pub use field::F;
 pub use hash::{ByteHasher, HashBackend, Hasher, Sha256Backend};
 pub use tag::{derive_tag_key, resolve, tag};
 pub use witness_key::derive_witness_key;

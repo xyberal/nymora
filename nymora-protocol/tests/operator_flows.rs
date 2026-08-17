@@ -17,7 +17,7 @@
 //! dissolution freezing everything while cached history still verifies; and exhaustion
 //! refusing at the door (§5.2).
 
-#![cfg(all(feature = "provisional-algebraic-hash", feature = "operator"))]
+#![cfg(feature = "operator")]
 
 mod common;
 
@@ -43,18 +43,18 @@ use nymora_protocol::{
 };
 use std::vec::Vec;
 
-const DEPTH: usize = 4;
+use common::DEPTH;
 const AGORA: AgoraId = AgoraId::from_bytes([0x0a; 32]);
 const TIER2: PolicyClass = PolicyClass::from_bytes([0x71; 32]);
 const GENESIS: Epoch = Epoch::new(1);
 
 type Op = AgoraState<StubProver, DEPTH>;
 
-fn member(seed: u8) -> Member {
+fn member(seed: u8) -> Member<DEPTH> {
     Member::enroll(seed, AGORA, TIER2, GENESIS)
 }
 
-fn founded(founder: &mut Member, log: bool) -> Op {
+fn founded(founder: &mut Member<DEPTH>, log: bool) -> Op {
     found(founder, 0x1b, if log { Some(0x1c) } else { None })
 }
 
@@ -62,7 +62,7 @@ fn founded(founder: &mut Member, log: bool) -> Op {
 /// roots — the happy-path assembly the two migration-refusal tests start from.
 fn cut_migration(
     op: &Op,
-    from: &Member,
+    from: &Member<DEPTH>,
     device: u8,
     completion: u8,
 ) -> (
@@ -225,7 +225,10 @@ fn the_bulletin_is_a_signed_operator_statement() {
     );
 
     // A key the member never pinned refuses.
-    let wrong = nymora_crypto::signature::public_key(&[0x77; 32]);
+    let wrong = nymora_crypto::signature::public_key(
+        &nymora_crypto::signature::mint_signing_secret([0x77; 32]),
+    )
+    .expect("minted keys are canonical");
     assert!(accept_bulletin(
         &wrong,
         &bulletin.statement(AGORA),
@@ -380,7 +383,7 @@ fn the_bootstrap_arc_reaches_a_governed_group() {
     }
 
     // Charlie at threshold 2: one attestation no longer admits.
-    let mut charlie = Member::enroll(0x13, AGORA, TIER2, op.current_epoch());
+    let mut charlie = Member::<DEPTH>::enroll(0x13, AGORA, TIER2, op.current_epoch());
     op.credentials_init(charlie.leaf).unwrap();
     let session = op.start_vouch(charlie.leaf, TIER2, entropy(0x52)).unwrap();
     let (proof, n) = alice.vouch(&op, session);
@@ -424,7 +427,7 @@ fn vouch_sessions_disclose_nothing_and_die_with_their_epoch() {
     admit(&mut op, &mut bob, &[&alice], 0x51);
     advance(&mut op, &mut [&mut alice, &mut bob]);
 
-    let candidate = Member::enroll(0x14, AGORA, TIER2, op.current_epoch());
+    let candidate = Member::<DEPTH>::enroll(0x14, AGORA, TIER2, op.current_epoch());
     op.credentials_init(candidate.leaf).unwrap();
     // Idempotent, indistinguishable: initializing twice is the same acknowledgement.
     assert_eq!(
@@ -587,7 +590,7 @@ fn verification_is_member_gated_and_challenge_bound() {
 
     // A non-member has no path to a root (§7's premise): an outsider cannot even
     // assemble member material for this agora — their store holds nothing for it.
-    let outsider = Member::enroll(0x66, AgoraId::from_bytes([0x0b; 32]), TIER2, GENESIS);
+    let outsider = Member::<DEPTH>::enroll(0x66, AgoraId::from_bytes([0x0b; 32]), TIER2, GENESIS);
     let mut pk_buf = [0u8; 64];
     let mut record_buf = [0u8; 256];
     assert_eq!(
@@ -648,7 +651,7 @@ fn a_stale_proof_is_refused_against_fresher_roots() {
     let (_keys, _store, successor, spend, stale) = cut_migration(&op, &bob, 0x2b, 0x2c);
 
     // The roots move: Charlie lands, the boundary snapshots a new class root.
-    let mut charlie = Member::enroll(0x13, AGORA, TIER2, op.current_epoch());
+    let mut charlie = Member::<DEPTH>::enroll(0x13, AGORA, TIER2, op.current_epoch());
     admit(&mut op, &mut charlie, &[&alice], 0x52);
     advance(&mut op, &mut [&mut alice, &mut bob, &mut charlie]);
 
@@ -755,7 +758,7 @@ fn revocation_ends_standing_at_its_own_boundary() {
     let mut bob = member(0x12);
     admit(&mut op, &mut bob, &[&alice], 0x51);
     advance(&mut op, &mut [&mut alice, &mut bob]);
-    let mut charlie = Member::enroll(0x13, AGORA, TIER2, op.current_epoch());
+    let mut charlie = Member::<DEPTH>::enroll(0x13, AGORA, TIER2, op.current_epoch());
     admit(&mut op, &mut charlie, &[&alice], 0x52);
     advance(&mut op, &mut [&mut alice, &mut bob, &mut charlie]);
 
@@ -786,7 +789,7 @@ fn revocation_ends_standing_at_its_own_boundary() {
         )
         .expect("a member in good standing proves");
     });
-    let pending = Member::enroll(0x15, AGORA, TIER2, op.current_epoch());
+    let pending = Member::<DEPTH>::enroll(0x15, AGORA, TIER2, op.current_epoch());
     op.credentials_init(pending.leaf).unwrap();
     let open_session = op.start_vouch(pending.leaf, TIER2, entropy(0x56)).unwrap();
     let open_proposal = op
@@ -977,9 +980,14 @@ fn migration_is_accepted_spent_at_the_boundary_and_unrepeatable() {
         .expect("the superseded device keeps write capability until the boundary");
     });
 
-    // The boundary: the spend lands and is broadcast.
+    // The boundary: the spend lands and is broadcast — in the truncated ordering
+    // domain the exclusion sets hold keys in (proposal 0035).
     let bulletin = op.advance_epoch().unwrap();
-    assert!(bulletin.spent.contains(spend.as_bytes()));
+    assert!(bulletin
+        .spent
+        .contains(&nymora_accumulator::exclusion::truncate_key(
+            spend.as_bytes()
+        )));
     alice.apply_bulletin(&bulletin);
     bob.apply_bulletin(&bulletin);
 
@@ -1213,11 +1221,11 @@ fn dissolution_freezes_the_agora_terminally() {
 #[test]
 fn an_exhausted_class_refuses_at_the_door() {
     const TINY: usize = 1; // capacity 2
-    let mut alice = member(0x11);
+    let mut alice = Member::<TINY>::enroll(0x11, AGORA, TIER2, GENESIS);
     let mut op: AgoraState<StubProver, TINY> = found(&mut alice, 0x1b, None);
 
     // The second member takes the final seat — staged, not yet landed.
-    let mut second = member(0x12);
+    let mut second = Member::<TINY>::enroll(0x12, AGORA, TIER2, GENESIS);
     admit(&mut op, &mut second, &[&alice], 0x51);
 
     // A third candidate is refused at the door: the staged seat already counts.
@@ -1353,9 +1361,9 @@ fn a_candidate_lands_at_most_once() {
 #[test]
 fn a_refused_migration_does_not_burn_the_spend() {
     const TINY: usize = 1; // capacity 2
-    let mut alice = member(0x11);
+    let mut alice = Member::<TINY>::enroll(0x11, AGORA, TIER2, GENESIS);
     let mut op: AgoraState<StubProver, TINY> = found(&mut alice, 0x1b, None);
-    let mut bob = member(0x12);
+    let mut bob = Member::<TINY>::enroll(0x12, AGORA, TIER2, GENESIS);
     admit(&mut op, &mut bob, &[&alice], 0x51);
     advance(&mut op, &mut [&mut alice, &mut bob]);
     // Both seats are landed: the class is full, so any staging refuses.

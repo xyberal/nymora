@@ -13,6 +13,7 @@
 
 use midnight_curves::Bls12;
 use midnight_proofs::poly::kzg::params::ParamsKZG;
+use midnight_proofs::utils::SerdeFormat;
 use midnight_zk_stdlib::{optimal_k, prove, setup_pk, setup_vk, verify, MidnightPK, MidnightVK};
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
@@ -56,9 +57,30 @@ impl<const DEPTH: usize> Backend<DEPTH> {
         Self::from_params(srs)
     }
 
+    /// A backend over the serialized reference-string excerpt — the committed
+    /// Filecoin artifact in `srs/`, whose provenance chain and checksums live beside
+    /// it. The serialization is unchecked by design (load speed); the checksum in
+    /// `srs/README.md` is the integrity anchor, and verifying it is the caller's
+    /// step.
+    ///
+    /// # Errors
+    ///
+    /// Whatever the deserializer reports for bytes that are not a params file.
+    pub fn from_srs_bytes(mut bytes: &[u8]) -> std::io::Result<Self> {
+        let srs = ParamsKZG::<Bls12>::read_custom(&mut bytes, SerdeFormat::RawBytesUnchecked)?;
+        Ok(Self::from_params(srs))
+    }
+
     /// A backend over an externally supplied reference string (the inherited
     /// Filecoin excerpt, in production).
-    pub fn from_params(srs: ParamsKZG<Bls12>) -> Self {
+    ///
+    /// A string larger than the statements need is cut down to
+    /// [`required_k`](Self::required_k) first — proving cost follows the string's
+    /// size, and the committed excerpt deliberately carries headroom.
+    pub fn from_params(mut srs: ParamsKZG<Bls12>) -> Self {
+        if midnight_proofs::poly::commitment::Params::max_k(&srs) > Self::required_k() {
+            srs.downsize(Self::required_k());
+        }
         let chain_vk = setup_vk(&srs, &ChainRelation::<DEPTH>);
         let chain_pk = setup_pk(&ChainRelation::<DEPTH>, &chain_vk);
         let migration_vk = setup_vk(&srs, &MigrationRelation::<DEPTH>);
@@ -115,7 +137,7 @@ impl<const DEPTH: usize> Backend<DEPTH> {
     ///
     /// [`ProveError::Unsatisfiable`] when the witness does not satisfy the
     /// statement; [`ProveError::Backend`] otherwise.
-    pub fn prove_migration(
+    pub fn prove_migration_statement(
         &self,
         witness: &MigrationWitness<DEPTH>,
         instance: &MigrationInstance,
@@ -137,7 +159,7 @@ impl<const DEPTH: usize> Backend<DEPTH> {
 
     /// Whether `proof` establishes the migration statement for exactly these
     /// public inputs.
-    pub fn verify_migration(&self, proof: &[u8], instance: &MigrationInstance) -> bool {
+    pub fn verify_migration_statement(&self, proof: &[u8], instance: &MigrationInstance) -> bool {
         verify::<MigrationRelation<DEPTH>, blake2b_simd::State>(
             &self.srs.verifier_params(),
             &self.migration_vk,

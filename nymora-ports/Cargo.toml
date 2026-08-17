@@ -19,9 +19,7 @@ software-key-store = ["dep:sha2", "dep:nymora-crypto"]
 [dependencies]
 nymora-core = { path = "../nymora-core" }
 # Used only by `software-key-store`: sha2 for the local seed derivations no counterparty
-# recomputes, nymora-crypto for the provisional signature the stub prover *does* verify —
-# see that module on where the boundary between the two lies.
+# recomputes, nymora-crypto for the certificate scheme every verifier of a certificate
+# recomputes — see that module on where the boundary between the two lies.
 sha2 = { version = "0.10", default-features = false, optional = true }
-nymora-crypto = { path = "../nymora-crypto", default-features = false, features = [
-    "provisional-signature",
-], optional = true }
+nymora-crypto = { path = "../nymora-crypto", default-features = false, optional = true }

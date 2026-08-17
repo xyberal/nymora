@@ -29,17 +29,14 @@
 
 #![no_std]
 
-#[cfg(feature = "provisional-algebraic-hash")]
 mod action;
 
-#[cfg(feature = "provisional-algebraic-hash")]
 pub use action::{
     prove_authorship, prove_live_auth, prove_migration, prove_policy_approval,
     prove_verification_access, prove_vouch, verify_authorship, verify_live_auth, verify_migration,
     verify_policy_approval, verify_verification_access, verify_vouch, EpochRoots,
 };
 
-#[cfg(feature = "provisional-algebraic-hash")]
 pub use nymora_circuits::{Action, ChainWitness, MigrationWitness, ProofSystem};
 
 #[cfg(test)]

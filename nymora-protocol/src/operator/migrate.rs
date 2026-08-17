@@ -57,8 +57,12 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
         successor: Commitment,
     ) -> Result<Admission, ProtocolError> {
         self.live()?;
-        let already_spent = self.spends.keys().any(|key| key == spend.as_bytes())
-            || self.staged.spends.contains(&spend);
+        // The set stores keys in the truncated ordering domain (proposal 0035), so the
+        // duplicate check compares truncations — the same identity the absence clause
+        // proves over.
+        let truncated = nymora_accumulator::exclusion::truncate_key(spend.as_bytes());
+        let already_spent =
+            self.spends.keys().any(|key| key == truncated) || self.staged.spends.contains(&spend);
         if already_spent {
             return Err(Rejection::because(LocalReason::DuplicateNullifier).into());
         }

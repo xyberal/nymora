@@ -7,13 +7,13 @@
 //! the witness, hands the backend the statement it names, and reconstructs the same
 //! statement on the verify side.
 
-#![cfg(all(feature = "provisional-algebraic-hash", feature = "stub-prover"))]
+#![cfg(feature = "stub-prover")]
 
 use nymora_accumulator::{AbsenceWitness, ExclusionSet, Tree, Witness};
 use nymora_circuits::StubProver;
 use nymora_core::{
-    AgoraId, Commitment, CredentialKey, Epoch, EpochCertPayload, EpochSecretKey, MessageHash,
-    MigrationCertPayload, RootOpening, SessionContext,
+    AgoraId, Commitment, CredentialKey, Epoch, EpochSecretKey, MessageHash, RootOpening,
+    SessionContext,
 };
 use nymora_crypto::{commit, nullifier, signature};
 use nymora_proofs::{
@@ -26,8 +26,17 @@ use nymora_proofs::{
 const DEPTH: usize = 2;
 const AGORA: AgoraId = AgoraId::from_bytes([0x01; 32]);
 const EPOCH: Epoch = Epoch::new(7);
-const ROOT_SEED: [u8; 32] = [0x0a; 32];
-const EPOCH_SEED: [u8; 32] = [0x0d; 32];
+// Canonical Jubjub scalars by construction — the minting rule of proposal 0035.
+const ROOT_SEED: [u8; 32] = {
+    let mut b = [0x0a; 32];
+    b[31] &= 0x07;
+    b
+};
+const EPOCH_SEED: [u8; 32] = {
+    let mut b = [0x0d; 32];
+    b[31] &= 0x07;
+    b
+};
 
 struct Fixture {
     epoch_key: EpochSecretKey,
@@ -38,33 +47,31 @@ struct Fixture {
     root_public_key: [u8; signature::PUBLIC_KEY_LEN],
     leaf: Commitment,
     leaf_witness: Witness<DEPTH>,
-    revocation_absence: AbsenceWitness,
-    spend_absence: AbsenceWitness,
+    revocation_absence: AbsenceWitness<DEPTH>,
+    spend_absence: AbsenceWitness<DEPTH>,
     roots: EpochRoots,
 }
 
 fn fixture() -> Fixture {
-    let root_public_key = signature::public_key(&ROOT_SEED);
+    let root_public_key = signature::public_key(&ROOT_SEED).expect("canonical seed");
     let credential_key = CredentialKey::new([0x0b; 32]);
     let root_opening = RootOpening::new([0x0c; 32]);
-    let leaf = commit(&root_public_key, &credential_key, &root_opening, &AGORA);
+    let leaf = commit(&root_public_key, &credential_key, &root_opening, &AGORA)
+        .expect("the root key is a subgroup point");
 
     let mut tree = Tree::<DEPTH>::new();
     let position = tree.append(leaf).expect("tree has room");
     let leaf_witness = tree.witness(position).expect("position was just appended");
 
-    let revocations = ExclusionSet::new();
-    let spends = ExclusionSet::new();
+    let revocations = ExclusionSet::<DEPTH>::new();
+    let spends = ExclusionSet::<DEPTH>::new();
     let spend = nullifier::migration(&credential_key, &leaf, &AGORA);
 
     let epoch_key = EpochSecretKey::new(EPOCH_SEED);
-    let epoch_public_key = signature::public_key(&EPOCH_SEED);
-    let cert = EpochCertPayload {
-        agora: AGORA,
-        epoch: EPOCH,
-        epoch_public_key: &epoch_public_key,
-    };
-    let epoch_cert_signature = signature::sign(&ROOT_SEED, |put| cert.encode_parts(put));
+    let epoch_public_key = signature::public_key(&EPOCH_SEED).expect("canonical seed");
+    let message = signature::epoch_cert_message(&AGORA, EPOCH, &epoch_public_key)
+        .expect("the epoch key is a subgroup point");
+    let epoch_cert_signature = signature::sign(&ROOT_SEED, &message).expect("canonical seed");
 
     Fixture {
         epoch_key,
@@ -263,20 +270,20 @@ fn verification_access_binds_its_challenge_and_carries_no_output() {
 #[test]
 fn migration_round_trips_and_binds_its_successor() {
     let f = fixture();
-    let successor_seed = [0x1a; 32];
-    let successor_public_key = signature::public_key(&successor_seed);
+    let successor_seed = signature::mint_signing_secret([0x1a; 32]);
+    let successor_public_key =
+        signature::public_key(&successor_seed).expect("minted keys are canonical");
     let successor_opening = RootOpening::new([0x1b; 32]);
-    let cert = MigrationCertPayload {
-        agora: AGORA,
-        successor_public_key: &successor_public_key,
-    };
-    let cert_signature = signature::sign(&ROOT_SEED, |put| cert.encode_parts(put));
+    let message = signature::migration_cert_message(&AGORA, &successor_public_key)
+        .expect("the successor key is a subgroup point");
+    let cert_signature = signature::sign(&ROOT_SEED, &message).expect("canonical seed");
     let successor_commitment = commit(
         &successor_public_key,
         &f.credential_key,
         &successor_opening,
         &AGORA,
-    );
+    )
+    .expect("the successor key is a subgroup point");
 
     let witness = MigrationWitness {
         old_root_public_key: &f.root_public_key,

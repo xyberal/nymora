@@ -47,7 +47,7 @@ pub use digest::{
     Commitment, LedgerHash, MessageHash, Nullifier, Root, SessionCommitment, SessionContext,
     SessionPseudonym, Tag, DIGEST_LEN,
 };
-pub use domain::Domain;
+pub use domain::{field_domain, Domain};
 pub use epoch::Epoch;
 pub use error::{LocalReason, ProtocolError, Rejection};
 pub use handoff::{MigrationHandoff, HANDOFF_VERSION};

@@ -16,19 +16,22 @@ constructions accept them, and framing is what keeps them distinguishable from a
 
 `tests/conformance.rs` runs them against this implementation and will fail if any value moves.
 
-## `status`, and why it matters
+## `status`
 
-**`settled`** — the byte family (§6.5). These constructions use SHA-256, which is chosen and
-permanent because none of their values enters a circuit. A second implementation can match these
-today, and a change to any of them is a protocol break requiring a domain-tag version bump.
+Every construction is **`settled`** (proposal 0035; nothing has been provisional since the
+real primitives landed). Two families share the file:
 
-**`provisional`** — the algebraic family. These will be recomputed inside the zero-knowledge
-circuit, so they must use the single network-wide algebraic hash of §6.5, which is not yet
-chosen. SHA-256 stands in for it. **The digests will change when the real hash arrives.**
+- **The byte family** — SHA-256 with framed domain tags, for every value that never enters
+  a circuit.
+- **The algebraic family** — Poseidon over the BLS12-381 scalar field in the pinned
+  instance of §6.5, plus the §9.1 certificate scheme, for every value the standardized
+  circuit recomputes. Inputs and outputs are canonical little-endian field-element bytes;
+  identifiers cross into the field by the truncation rule proposal 0035 states.
 
-What a provisional vector pins is the *shape*: the domain tag, the field order, the length
-framing, and which value goes where. Those are settled, and getting them wrong is the failure
-these vectors exist to catch. The digest itself is not yet a commitment.
+The algebraic-family expected values were computed by a **second implementation** of the
+same instances — the proving stack's own CPU primitives, over its own curve fork — so they
+validate this implementation rather than merely recording its output. A change to any value
+in this file is a protocol break requiring a domain-tag version bump.
 
 ## A note on the KDF
 

@@ -62,9 +62,9 @@ pub struct ChainWitness<'a, const DEPTH: usize> {
     /// The Merkle path showing the recomputed leaf under the class root (§5.2).
     pub leaf_witness: &'a Witness<DEPTH>,
     /// Non-membership of the leaf in the revocation set (§11).
-    pub revocation_absence: &'a AbsenceWitness,
+    pub revocation_absence: &'a AbsenceWitness<DEPTH>,
     /// Non-membership of the derived migration nullifier in the spend set (§9.3).
-    pub spend_absence: &'a AbsenceWitness,
+    pub spend_absence: &'a AbsenceWitness<DEPTH>,
 }
 
 /// The action-specific final clause of §9.1, with its public output.
@@ -162,7 +162,7 @@ pub struct MigrationWitness<'a, const DEPTH: usize> {
     /// cannot migrate out from under its revocation (§11). In-statement because the leaf
     /// is hidden; the spend set needs no clause here, since the spend nullifier is this
     /// proof's public output and the verifier checks its own set directly.
-    pub revocation_absence: &'a AbsenceWitness,
+    pub revocation_absence: &'a AbsenceWitness<DEPTH>,
 }
 
 /// The public inputs of a migration proof (§9.3).

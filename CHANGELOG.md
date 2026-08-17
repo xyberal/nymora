@@ -5,6 +5,30 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- **The derivations cross into the field, and the provisional primitives retire**
+  (§5.2, §6.5, §9.1, §9.3, §15; proposal 0035, applied). The last cryptographic
+  stand-ins are gone: the algebraic family is the pinned Poseidon instance
+  implemented in `nymora-crypto` as the circuit's CPU twin, the certificate scheme is
+  the §9.1 EdDSA-over-Jubjub equation, the exclusion sets are gap trees at the
+  protocol depth, and the accumulator folds the untagged 2-to-1 hash with arity as
+  the leaf/node separation. One normative crossing now governs how bytes become
+  field elements — 254-bit truncation for identifiers, byte-family compression first
+  for variable-length ones, truncation-minted keys canonical by construction — and
+  the five actions share one tagged derivation, `Poseidon(ACTION, tag, key, context,
+  agora_id)`, making §6.5's uniform shape structural. Certificate payloads compress
+  to one field element in place of the length-framed byte layout; the transparency
+  log and boundary bulletin sign with the same one scheme over their byte-family
+  digests. The proving backend now stands **behind the `ProofSystem` boundary**: the
+  action API and both roles' state machines drive the real circuits through exactly
+  the interface they drove the stub through, demonstrated end to end at the protocol
+  depth. Every algebraic conformance vector regenerated, with expected values
+  computed by a second implementation of the same instances (the proving stack's own
+  CPU primitives) and a parity suite pinning the two implementations against each
+  other value for value. Wire widths did not move: keys 32 bytes, signatures 64,
+  every derived value 32. The stub prover remains the test backend, now evaluating
+  the real primitives; retired byte-family domains stay registered as reserved.
+
 ### Added
 - **The circuit's concrete instances are pinned** (§5.2, §6.5, §9.1; proposal 0034,
   applied). The three instance-level facts proposal 0033 left open are now named, each

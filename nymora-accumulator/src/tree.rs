@@ -21,16 +21,16 @@
 
 extern crate alloc;
 
-use crate::witness::{hash_leaf, hash_node, Node, Witness};
+use crate::witness::{hash_node, Node, Witness};
 use alloc::vec::Vec;
 use nymora_core::{Commitment, Root, DIGEST_LEN};
 
-/// The node value standing for an empty position.
+/// The node value standing for an empty position: the field's zero.
 ///
-/// All zeros, which is not in the image of [`hash_leaf`] for any value anyone can produce:
-/// landing on it would require a preimage of zero under the accumulator's hash. So an empty
-/// position cannot be confused with an occupied one, and no separate domain tag is needed to
-/// keep them apart.
+/// Every occupied leaf in these trees is a domain-tagged Poseidon output (a credential
+/// leaf or a gap leaf — proposal 0035), so landing on zero would require a preimage of
+/// zero under the pinned hash. An empty position cannot be confused with an occupied
+/// one.
 const EMPTY_LEAF: Node = Node::from_bytes([0u8; DIGEST_LEN]);
 
 /// A fixed-depth append-only Merkle tree over opaque values.
@@ -100,13 +100,19 @@ impl<const DEPTH: usize> Tree<DEPTH> {
         levels
     }
 
-    /// Every occupied node, level by level, `[0]` being the hashed leaves.
+    /// Every occupied node, level by level, `[0]` being the leaf values themselves —
+    /// the fold's convention (proposal 0035): a leaf enters as itself.
     ///
     /// Only the occupied prefix is materialised; anything beyond it is the level's empty hash.
     fn occupied_levels(&self) -> Vec<Vec<Node>> {
         let empty = Self::empty_levels();
         let mut levels = Vec::with_capacity(DEPTH + 1);
-        levels.push(self.leaves.iter().map(hash_leaf).collect::<Vec<_>>());
+        levels.push(
+            self.leaves
+                .iter()
+                .map(|leaf| Node::from_bytes(*leaf.as_bytes()))
+                .collect::<Vec<_>>(),
+        );
 
         for level in 0..DEPTH {
             let below = &levels[level];

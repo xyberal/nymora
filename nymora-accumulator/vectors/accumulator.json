@@ -1,59 +1,69 @@
 {
-  "note": "Generated independently of the Rust implementation; see vectors/README.md",
-  "constructions": [
+ "note": "Generated independently of the Rust implementation; see vectors/README.md",
+ "constructions": [
+  {
+   "name": "hash_node",
+   "spec": "§5.2",
+   "status": "settled",
+   "cases": [
     {
-      "name": "hash_leaf",
-      "spec": "\u00a75.2",
-      "status": "provisional",
-      "cases": [
-        {
-          "name": "leaf",
-          "value": "0101010101010101010101010101010101010101010101010101010101010101",
-          "output": "96c864532137530b983e15146f4a3b09ad14ee53a80cf2ccdab6e053e5ae0ec4"
-        }
-      ]
-    },
-    {
-      "name": "hash_node",
-      "spec": "\u00a75.2",
-      "status": "provisional",
-      "cases": [
-        {
-          "name": "node",
-          "left": "0101010101010101010101010101010101010101010101010101010101010101",
-          "right": "0202020202020202020202020202020202020202020202020202020202020202",
-          "output": "1bfeed8943f3a201d322984960ecd591e8454f3cdb3a90b6eb14c6966d324207"
-        }
-      ]
-    },
-    {
-      "name": "root_from",
-      "spec": "\u00a75.2",
-      "status": "provisional",
-      "cases": [
-        {
-          "name": "depth-2-index-1",
-          "value": "0101010101010101010101010101010101010101010101010101010101010101",
-          "index": 1,
-          "siblings": [
-            "0202020202020202020202020202020202020202020202020202020202020202",
-            "0303030303030303030303030303030303030303030303030303030303030303"
-          ],
-          "output": "1a2b950bc4c014bf629ac13eb22681ac579797cd03b2b57cb7118a5b68904522"
-        }
-      ]
-    },
-    {
-      "name": "empty_root",
-      "spec": "\u00a75.2",
-      "status": "provisional",
-      "cases": [
-        {
-          "name": "depth-3-empty",
-          "depth": 3,
-          "output": "630ef8666c99e9e411542b4d48aace455dca2f39d2a86352c946e0dd6557c29d"
-        }
-      ]
+     "name": "node",
+     "left": "0101010101010101010101010101010101010101010101010101010101010101",
+     "right": "0202020202020202020202020202020202020202020202020202020202020202",
+     "output": "a9be19003b1edb31c84627f4a39d56dca0ed8e7769edbfcfb6fd0af59ef0fa1a"
     }
-  ]
+   ]
+  },
+  {
+   "name": "root_from",
+   "spec": "§5.2",
+   "status": "settled",
+   "cases": [
+    {
+     "name": "depth-2-index-1",
+     "value": "0101010101010101010101010101010101010101010101010101010101010101",
+     "index": 1,
+     "siblings": [
+      "0202020202020202020202020202020202020202020202020202020202020202",
+      "0303030303030303030303030303030303030303030303030303030303030303"
+     ],
+     "output": "54e28a5c7862f2376331f3d10d8ff3d226cfc71389170cd468498e2ccd410f00"
+    }
+   ]
+  },
+  {
+   "name": "empty_root",
+   "spec": "§5.2",
+   "status": "settled",
+   "cases": [
+    {
+     "name": "depth-3-empty",
+     "depth": 3,
+     "output": "d22e1ddd3f054cb7f7ef52d132cac56f856480d4d15ca32c9b8bd612f4ee9a0e"
+    }
+   ]
+  },
+  {
+   "name": "exclusion_root",
+   "spec": "§9.1, §11",
+   "status": "settled",
+   "cases": [
+    {
+     "name": "depth-4-empty",
+     "depth": 4,
+     "keys": [],
+     "output": "0e5656b9f64419e39e5a77dcaf7e2f2ab128724a9f77ff459c89e8ceb298d110"
+    },
+    {
+     "name": "depth-4-two-keys",
+     "depth": 4,
+     "keys": [
+      "1111111111111111111111111111111111111111111111111111111111111111",
+      "2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b"
+     ],
+     "output": "a50374b16642b7530c3fecda493b2d9db350328f9718ab3b9d5bf0b6da5e9854"
+    }
+   ]
+  }
+ ]
 }

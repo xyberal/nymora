@@ -10,10 +10,10 @@
 //! trait is the boundary everything above builds against; the real circuit arrives behind
 //! it, and until then the [`stub`] backend evaluates the same statements in the clear.
 //!
-//! The statement types sit behind the provisional feature because every clause is
-//! expressed over the stand-in algebraic hash and the provisional witness structures. The
-//! stub additionally sits behind `stub-prover` and must never leave a test process — see
-//! its module documentation for what it is honest about and what it is loudly not.
+//! The statements are expressed over the real primitives — the pinned Poseidon
+//! instance and the §9.1 certificate scheme (proposals 0033, 0034, 0035). The stub sits
+//! behind `stub-prover` and must never leave a test process — see its module
+//! documentation for what it is honest about and what it is loudly not.
 
 #![no_std]
 
@@ -26,20 +26,16 @@
 /// to exercise the algebra on small trees.
 pub const PROTOCOL_DEPTH: usize = 32;
 
-#[cfg(feature = "provisional-algebraic-hash")]
 pub mod statement;
 #[cfg(feature = "stub-prover")]
 pub mod stub;
-#[cfg(feature = "provisional-algebraic-hash")]
 pub mod system;
 
-#[cfg(feature = "provisional-algebraic-hash")]
 pub use statement::{
     Action, ChainPublicInputs, ChainWitness, MigrationPublicInputs, MigrationWitness,
 };
 #[cfg(feature = "stub-prover")]
 pub use stub::{MigrationStubProof, StubProof, StubProver};
-#[cfg(feature = "provisional-algebraic-hash")]
 pub use system::ProofSystem;
 
 #[cfg(test)]

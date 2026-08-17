@@ -44,8 +44,7 @@ use nymora_core::{CredentialKey, Epoch, RootOpening};
 use nymora_ports::{KeyStore, RootMaterialOut, RootMaterialWritten, SecureStorage, Slot};
 use zeroize::Zeroizing;
 
-#[cfg(feature = "provisional-algebraic-hash")]
-use nymora_crypto::{commit, nullifier};
+use nymora_crypto::{commit, nullifier, signature};
 
 /// Fresh secret bytes from the host's CSPRNG, consumed exactly once.
 ///
@@ -116,7 +115,6 @@ pub const MAX_EPOCH_GAP: u64 = 100_000;
 /// Whatever the ports report, unchanged: [`ProtocolError::Unavailable`] where a backend or
 /// the store could not act, [`ProtocolError::Malformed`] where a caller buffer is too
 /// small.
-#[cfg(feature = "provisional-algebraic-hash")]
 pub fn create(
     agora: AgoraId,
     key_store: &dyn KeyStore,
@@ -137,7 +135,9 @@ pub fn create(
 
     let sk_cred = CredentialKey::new(credential_key.take());
     let r_root = RootOpening::new(root_opening.take());
-    let commitment = commit(pk_root, &sk_cred, &r_root, &agora);
+    // A key store that produced bytes naming no subgroup point has violated its own
+    // contract; the caller's material is unusable.
+    let commitment = commit(pk_root, &sk_cred, &r_root, &agora).ok_or(ProtocolError::Malformed)?;
 
     store_credential_material(storage, agora, &sk_cred, &r_root, pk_root)?;
 
@@ -201,14 +201,15 @@ pub fn discard_expired(
     Ok(())
 }
 
-/// Rolls the credential to `current`: sweeps ended epochs, certifies the fresh key, stores
-/// it with its certificate, and advances the cursor.
+/// Rolls the credential to `current`: sweeps ended epochs, mints and certifies the fresh
+/// key, stores it with its certificate, and advances the cursor.
 ///
-/// The epoch keypair arrives as the host's signature scheme produced it — see the module
-/// documentation for why the public half is not derived here. `record` is scratch for the
-/// stored certificate record and must hold the public key, the signature, and two length
-/// prefixes; the signature is written through [`KeyStore::sign_epoch_cert`], which may
-/// prompt for user presence (§9.2).
+/// The epoch scalar is minted from the supplied entropy by the truncation rule and its
+/// public half derived here (proposal 0035) — the scheme is protocol-fixed (§9.1), so
+/// there is no host shape to defer to, and a caller cannot hand in a mismatched pair.
+/// `record` is scratch for the stored certificate record and must hold the public key,
+/// the signature, and two length prefixes; the signature is written through
+/// [`KeyStore::sign_epoch_cert`], which may prompt for user presence (§9.2).
 ///
 /// Certifying the epoch the cursor already names is permitted and overwrites: nothing can
 /// prevent a member holding two keys in one epoch (§9.1), and this store does not pretend
@@ -229,7 +230,6 @@ pub fn roll_epoch(
     storage: &mut dyn SecureStorage,
     current: Epoch,
     epoch_secret: FreshEntropy,
-    epoch_public_key: &[u8],
     record: &mut [u8],
 ) -> Result<(), ProtocolError> {
     if let Some(cursor) = load_cursor(agora, storage)? {
@@ -238,13 +238,15 @@ pub fn roll_epoch(
         }
     }
 
+    let secret = signature::mint_signing_secret(epoch_secret.take());
+    let epoch_public_key = signature::public_key(&secret).expect("minted keys are canonical");
+
     // Sign before destroying anything: a refused prompt or a short buffer must leave the
     // credential exactly as it was.
-    let record_len = sign_epoch_record(agora, key_store, current, epoch_public_key, record)?;
+    let record_len = sign_epoch_record(agora, key_store, current, &epoch_public_key, record)?;
 
     discard_expired(agora, storage, current)?;
 
-    let secret = epoch_secret.take();
     storage.store(agora, Slot::EpochKey(current), &secret)?;
     if let Err(error) = storage.store(agora, Slot::EpochCert(current), &record[..record_len]) {
         let _ = storage.delete(agora, Slot::EpochKey(current));
@@ -452,7 +454,6 @@ pub fn authorize_migration(
 /// [`ProtocolError::Malformed`] if the handoff names a different agora — a handoff applied
 /// to the wrong membership must fail before anything derives from it. Storage errors as
 /// [`create`].
-#[cfg(feature = "provisional-algebraic-hash")]
 pub fn complete_migration(
     agora: AgoraId,
     storage: &mut dyn SecureStorage,
@@ -465,7 +466,8 @@ pub fn complete_migration(
     }
 
     let r_root = RootOpening::new(root_opening.take());
-    let commitment = commit(root_public_key, &handoff.credential_key, &r_root, &agora);
+    let commitment = commit(root_public_key, &handoff.credential_key, &r_root, &agora)
+        .ok_or(ProtocolError::Malformed)?;
     // The consumed leaf is derived from the handoff, never carried in it — a derived value
     // cannot disagree with the material the migration proof opens it with.
     let consumed_leaf = commit(
@@ -473,7 +475,8 @@ pub fn complete_migration(
         &handoff.credential_key,
         &handoff.root_opening,
         &agora,
-    );
+    )
+    .ok_or(ProtocolError::Malformed)?;
     let spend = nullifier::migration(&handoff.credential_key, &consumed_leaf, &agora);
 
     store_credential_material(
@@ -612,7 +615,6 @@ mod tests {
         FreshEntropy::new([byte; 32])
     }
 
-    #[cfg(feature = "provisional-algebraic-hash")]
     fn created(store: &mut TestStore, agora: AgoraId) -> Created {
         let mut pk = [0u8; 32];
         let mut binding = [0u8; 32];
@@ -629,7 +631,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "provisional-algebraic-hash")]
     fn create_stores_the_three_durable_slots_and_returns_the_leaf() {
         let mut store = TestStore::default();
         let made = created(&mut store, AGORA_A);
@@ -650,13 +651,12 @@ mod tests {
             &RootOpening::new([0x22; 32]),
             &AGORA_A,
         );
-        assert_eq!(made.commitment, expected);
+        assert_eq!(Some(made.commitment), expected);
         assert_eq!(made.root.binding, None, "the software backend claims none");
     }
 
     /// The atomicity contract: a failure part-way must leave no slot behind.
     #[test]
-    #[cfg(feature = "provisional-algebraic-hash")]
     fn create_unwinds_every_slot_a_failure_leaves_behind() {
         for allowed in 0..3 {
             let mut store = TestStore {
@@ -688,7 +688,6 @@ mod tests {
     /// hostile or broken host, yields unrelated credentials — by construction (0013), not
     /// because the entropy rule was followed.
     #[test]
-    #[cfg(feature = "provisional-algebraic-hash")]
     fn identical_entropy_in_two_agoras_yields_unrelated_credentials() {
         let mut store = TestStore::default();
         let first = created(&mut store, AGORA_A);
@@ -704,7 +703,6 @@ mod tests {
             store,
             Epoch::new(epoch),
             entropy(secret),
-            &[0xcc; 32],
             &mut record,
         )
         .expect("rollover succeeds");
@@ -722,19 +720,22 @@ mod tests {
         let record = load_epoch_record(AGORA_A, &store, Epoch::new(5), &mut buffer)
             .unwrap()
             .expect("record is stored");
-        assert_eq!(record.public_key, &[0xcc; 32]);
+        // The stored public key is derived from the minted epoch scalar — the pair
+        // cannot mismatch because the caller never supplies it (proposal 0035).
+        let minted = signature::mint_signing_secret([0xe1; 32]);
+        let expected_pk = signature::public_key(&minted).expect("minted keys are canonical");
+        assert_eq!(record.public_key, &expected_pk);
 
         // The stored signature is exactly the backend's signature over the canonical
-        // payload — recomputable because the software backend is deterministic. The buffer
-        // is generous rather than sized to the scheme: the stand-in's signature width is
-        // deliberately unpinned here.
+        // message — recomputable because the software backend is deterministic and the
+        // scheme's nonce is (§9.1).
         let mut expected = [0u8; 128];
         let len = key_store()
             .sign_epoch_cert(
                 &EpochCertPayload {
                     agora: AGORA_A,
                     epoch: Epoch::new(5),
-                    epoch_public_key: &[0xcc; 32],
+                    epoch_public_key: &expected_pk,
                 },
                 &mut expected,
             )
@@ -796,7 +797,6 @@ mod tests {
                 &mut store,
                 Epoch::new(5),
                 entropy(0xe2),
-                &[0xcc; 32],
                 &mut record,
             ),
             Err(ProtocolError::Malformed)
@@ -830,7 +830,7 @@ mod tests {
             .load(AGORA_A, Slot::EpochKey(Epoch::new(5)), &mut key)
             .unwrap()
             .unwrap();
-        assert_eq!(&key[..len], &[0xe2; 32]);
+        assert_eq!(&key[..len], &signature::mint_signing_secret([0xe2; 32]));
     }
 
     #[test]
@@ -870,7 +870,6 @@ mod tests {
     /// The full path-1 flow across two devices, per §9.3's ordering: the successor's root
     /// exists first, the old device authorizes, the successor completes.
     #[test]
-    #[cfg(feature = "provisional-algebraic-hash")]
     fn planned_migration_carries_the_credential_key_and_spends_the_old_leaf() {
         let mut old_device = TestStore::default();
         let old = created(&mut old_device, AGORA_A);
@@ -909,7 +908,7 @@ mod tests {
                 &handoff.root_opening,
                 &AGORA_A,
             ),
-            old.commitment
+            Some(old.commitment)
         );
 
         let mut new_device = TestStore::default();
@@ -941,29 +940,37 @@ mod tests {
     /// One leaf, one spend — but a lineage migrates more than once, and each consumed leaf
     /// spends its own nullifier (§9.3, proposal 0015).
     #[test]
-    #[cfg(feature = "provisional-algebraic-hash")]
     fn each_migration_of_a_lineage_spends_its_own_nullifier() {
         // Varying the old opening varies the derived consumed leaf — two migrations of one
         // lineage, two distinct spends.
+        let old_root = signature::public_key(&signature::mint_signing_secret([0x11; 32]))
+            .expect("minted keys are canonical");
+        let successor_root = signature::public_key(&signature::mint_signing_secret([0x66; 32]))
+            .expect("minted keys are canonical");
         let sign = |opening: u8| {
             let handoff = MigrationHandoff {
                 agora: AGORA_A,
                 credential_key: CredentialKey::new([0x44; 32]),
                 root_opening: RootOpening::new([opening; 32]),
-                root_public_key: &[0x11; 32],
+                root_public_key: &old_root,
                 migration_cert: b"cert",
             };
             let mut store = TestStore::default();
-            complete_migration(AGORA_A, &mut store, &handoff, &[0x66; 32], entropy(0x23))
-                .expect("migration completes")
-                .spend
+            complete_migration(
+                AGORA_A,
+                &mut store,
+                &handoff,
+                &successor_root,
+                entropy(0x23),
+            )
+            .expect("migration completes")
+            .spend
         };
         assert_ne!(sign(0xaa), sign(0xab));
     }
 
     /// A handoff must fail against the wrong agora before anything derives from it.
     #[test]
-    #[cfg(feature = "provisional-algebraic-hash")]
     fn a_handoff_for_another_agora_is_refused() {
         let handoff = MigrationHandoff {
             agora: AGORA_B,
@@ -985,7 +992,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "provisional-algebraic-hash")]
     fn authorizing_without_a_credential_is_unavailable() {
         let store = TestStore::default();
         let mut pk = [0u8; 64];
@@ -1011,7 +1017,6 @@ mod tests {
     /// one agora may equal its counterpart in the other, and the migration in one must
     /// leave the other untouched.
     #[test]
-    #[cfg(feature = "provisional-algebraic-hash")]
     fn the_full_lifecycle_runs_in_two_agoras_without_a_shared_value() {
         let mut store = TestStore::default();
 
@@ -1095,7 +1100,8 @@ mod tests {
             &handoff.credential_key,
             &handoff.root_opening,
             &AGORA_A,
-        );
+        )
+        .expect("the root key is a subgroup point");
         let spend_in_b = nullifier::migration(&CredentialKey::new([0x44; 32]), &consumed, &AGORA_B);
         assert_ne!(migrated.spend, spend_in_b);
         assert_ne!(migrated.commitment, second.commitment);

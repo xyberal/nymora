@@ -2,21 +2,19 @@
 
 //! Runs the conformance vectors in `vectors/` against this implementation.
 //!
-//! Every construction here is **provisional**: accumulator nodes are recomputed inside the
-//! circuit, so they use the algebraic hash of §6.5, which is not yet chosen. What these vectors
-//! pin is the shape — the two domain tags, the leaf-upward sibling order, which child an index
-//! bit selects, and the empty-subtree value. The digests move when the real hash arrives.
-//!
-//! See `../../nymora-crypto/vectors/README.md` for the settled/provisional distinction.
+//! Every expected value here was computed by a second implementation of the same
+//! pinned instances — the proving stack's own CPU primitives — not by this crate, so
+//! the vectors validate the construction rather than merely recording its output (see
+//! `../../nymora-crypto/vectors/README.md`). What they pin: the untagged 2-to-1 node,
+//! the leaf-enters-as-itself fold with its index-bit child selection, the zero empty
+//! subtree, and the gap-tree exclusion roots with their sentinels (proposal 0035).
 
-// Everything in this harness exercises the provisional algebraic structures, and building the
-// trees needs the `build` feature — without either, there is nothing to check. (The crypto
-// crate's harness instead skips case-by-case, because it mixes settled and provisional vectors;
-// this one is provisional throughout.)
-#![cfg(all(feature = "provisional-algebraic-hash", feature = "build"))]
+// Building the trees and sets needs the `build` feature; without it there is nothing
+// to run the vectors against.
+#![cfg(feature = "build")]
 
-use nymora_accumulator::{hash_leaf, hash_node, root_from, Node, Tree, Witness};
-use nymora_core::Commitment;
+use nymora_accumulator::{hash_node, root_from, ExclusionSet, Node, Tree, Witness};
+use nymora_core::{Commitment, Root};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -51,6 +49,13 @@ fn array(value: &serde_json::Value, field: &str) -> [u8; 32] {
         .unwrap_or_else(|_| panic!("field `{field}` is not 32 bytes"))
 }
 
+fn hex_array(value: &serde_json::Value) -> [u8; 32] {
+    let hex = value.as_str().expect("entry is a hex string");
+    bytes(&serde_json::json!({ "v": hex }), "v")
+        .try_into()
+        .expect("entry is 32 bytes")
+}
+
 fn check(construction: &str, case: &serde_json::Value, actual: &[u8; 32]) {
     let name = case["name"].as_str().unwrap_or("<unnamed>");
     assert_eq!(
@@ -68,18 +73,14 @@ fn every_vector_matches() {
     let mut checked = 0usize;
     for construction in &suite.constructions {
         assert_eq!(
-            construction.status, "provisional",
-            "{} claims a settled status, but every accumulator hash is algebraic-family",
-            construction.name
+            construction.status.as_str(),
+            "settled",
+            "{} carries an unrecognised status `{}`",
+            construction.name,
+            construction.status
         );
-
         for case in &construction.cases {
             match construction.name.as_str() {
-                "hash_leaf" => {
-                    let node = hash_leaf(&Commitment::from_bytes(array(case, "value")));
-                    check(&construction.name, case, node.as_bytes());
-                }
-
                 "hash_node" => {
                     let node = hash_node(
                         &Node::from_bytes(array(case, "left")),
@@ -93,24 +94,40 @@ fn every_vector_matches() {
                         .as_array()
                         .expect("siblings is an array")
                         .iter()
-                        .map(|sibling| {
-                            let hex = sibling.as_str().expect("sibling is a hex string");
-                            Node::from_bytes(array(&serde_json::json!({ "v": hex }), "v"))
-                        })
+                        .map(|s| Node::from_bytes(hex_array(s)))
                         .collect();
-                    let siblings: [Node; 2] = siblings.try_into().expect("this vector is depth 2");
-
-                    let witness =
-                        Witness::new(case["index"].as_u64().expect("index is a number"), siblings)
-                            .expect("the vector's index is within its depth");
-
+                    let siblings: [Node; 2] =
+                        siblings.try_into().expect("this vector is cut at depth 2");
+                    let witness = Witness::<2>::new(
+                        case["index"].as_u64().expect("index is a number"),
+                        siblings,
+                    )
+                    .expect("the vector index is within depth");
                     let root = root_from(&Commitment::from_bytes(array(case, "value")), &witness);
                     check(&construction.name, case, root.as_bytes());
                 }
 
                 "empty_root" => {
-                    assert_eq!(case["depth"].as_u64(), Some(3), "this vector is depth 3");
-                    check(&construction.name, case, Tree::<3>::new().root().as_bytes());
+                    assert_eq!(
+                        case["depth"].as_u64(),
+                        Some(3),
+                        "this vector is cut at depth 3"
+                    );
+                    let empty: Root = Tree::<3>::new().root();
+                    check(&construction.name, case, empty.as_bytes());
+                }
+
+                "exclusion_root" => {
+                    assert_eq!(
+                        case["depth"].as_u64(),
+                        Some(4),
+                        "this vector is cut at depth 4"
+                    );
+                    let mut set = ExclusionSet::<4>::new();
+                    for key in case["keys"].as_array().expect("keys is an array") {
+                        set.insert(hex_array(key));
+                    }
+                    check(&construction.name, case, set.root().as_bytes());
                 }
 
                 other => panic!("no runner for construction `{other}`"),
@@ -119,32 +136,5 @@ fn every_vector_matches() {
         }
     }
 
-    assert!(checked >= 4, "only {checked} vectors ran");
-}
-
-/// The operator's tree and a member's verification must agree — the reason both halves exist.
-///
-/// A vector pins each side against a fixed expectation; this pins them against *each other*, so
-/// a change that moved both consistently would still be caught by the vectors, and a change that
-/// moved only one is caught here.
-#[test]
-fn what_the_tree_builds_a_witness_proves() {
-    let mut tree = Tree::<4>::new();
-    for byte in 0..6u8 {
-        tree.append(Commitment::from_bytes([byte; 32]))
-            .expect("depth 4 holds sixteen");
-    }
-
-    let root = tree.root();
-    for position in 0..6u64 {
-        let witness = tree.witness(position).expect("appended");
-        assert!(
-            nymora_accumulator::verifies(
-                &Commitment::from_bytes([position as u8; 32]),
-                &witness,
-                &root
-            ),
-            "position {position} did not verify against the tree that built it"
-        );
-    }
+    assert!(checked >= 5, "only {checked} vectors ran");
 }

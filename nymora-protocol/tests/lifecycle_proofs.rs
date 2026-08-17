@@ -9,14 +9,11 @@
 //! clauses each refuse an otherwise-valid credential; and migration runs end-to-end from
 //! the handoff to a verified proof whose spend then locks the predecessor out.
 
-#![cfg(feature = "provisional-algebraic-hash")]
-
 use nymora_accumulator::{AbsenceWitness, ExclusionSet, Tree, Witness};
 use nymora_circuits::StubProver;
 use nymora_core::{
     AgoraId, Commitment, Epoch, MessageHash, ProtocolError, RootOpening, SessionContext,
 };
-use nymora_crypto::signature;
 use nymora_ports::{SecureStorage, Slot, SoftwareKeyStore};
 use nymora_proofs::{
     prove_authorship, prove_live_auth, prove_migration, prove_vouch, verify_authorship,
@@ -72,8 +69,8 @@ impl SecureStorage for TestStore {
 /// The operator's side of one agora: the class tree and the two exclusion sets.
 struct Operator {
     tree: Tree<DEPTH>,
-    revocations: ExclusionSet,
-    spends: ExclusionSet,
+    revocations: ExclusionSet<DEPTH>,
+    spends: ExclusionSet<DEPTH>,
 }
 
 impl Operator {
@@ -105,7 +102,7 @@ impl Operator {
         &self,
         leaf: &Commitment,
         spend_key: &[u8; 32],
-    ) -> (AbsenceWitness, AbsenceWitness) {
+    ) -> (AbsenceWitness<DEPTH>, AbsenceWitness<DEPTH>) {
         (
             self.revocations.absence_witness(leaf.as_bytes()),
             self.spends.absence_witness(spend_key),
@@ -138,7 +135,6 @@ fn member_acting_at(
     )
     .expect("creation succeeds");
 
-    let epoch_public_key = signature::public_key(&epoch_seed);
     let mut record = [0u8; 256];
     nymora_protocol::roll_epoch(
         agora,
@@ -146,7 +142,6 @@ fn member_acting_at(
         store,
         epoch,
         FreshEntropy::new(epoch_seed),
-        &epoch_public_key,
         &mut record,
     )
     .expect("rollover succeeds");
@@ -303,7 +298,6 @@ fn a_swept_epoch_cannot_reach_the_proof_layer() {
     let _leaf = member_acting_at(&mut store, &keys, AGORA_A, Epoch::new(5), [0xd5; 32]);
 
     // The device wakes long after epoch 5 ended and rolls straight to 9.
-    let late_public_key = signature::public_key(&[0xd9; 32]);
     let mut record = [0u8; 256];
     nymora_protocol::roll_epoch(
         AGORA_A,
@@ -311,7 +305,6 @@ fn a_swept_epoch_cannot_reach_the_proof_layer() {
         &mut store,
         Epoch::new(9),
         FreshEntropy::new([0xd9; 32]),
-        &late_public_key,
         &mut record,
     )
     .expect("late rollover succeeds");

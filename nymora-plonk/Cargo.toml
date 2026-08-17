@@ -15,6 +15,9 @@ publish = false
 description = "Both Nymora statements over Plonkish KZG on BLS12-381 (proposals 0033, 0034)"
 
 [dependencies]
+nymora-core = { path = "../nymora-core" }
+nymora-crypto = { path = "../nymora-crypto" }
+nymora-accumulator = { path = "../nymora-accumulator", default-features = false }
 nymora-circuits = { path = "../nymora-circuits", default-features = false }
 midnight-zk-stdlib = "2.3"
 midnight-circuits = "7.2"
@@ -29,6 +32,12 @@ num-bigint = "0.4"
 
 [dev-dependencies]
 sha2 = "0.10"
+# The parity and system suites build workspace trees and drive the action API
+# end to end through the `ProofSystem` boundary.
+nymora-proofs = { path = "../nymora-proofs", default-features = false }
+nymora-accumulator = { path = "../nymora-accumulator", default-features = false, features = [
+    "build",
+] }
 
 [lints.rust]
 unsafe_code = "forbid"

@@ -15,7 +15,7 @@
 //! subjects, and roots are compared pairwise and required distinct, and one agora's
 //! terminal event — dissolution — is required invisible in the other.
 
-#![cfg(all(feature = "provisional-algebraic-hash", feature = "operator"))]
+#![cfg(feature = "operator")]
 
 mod common;
 
@@ -32,7 +32,7 @@ use nymora_protocol::live_auth::Contribution;
 use nymora_protocol::operator::{AgoraState, Executed, LogEntry};
 use nymora_protocol::{authorize_migration, complete_migration, create_successor_root, Decision};
 
-const DEPTH: usize = 4;
+use common::DEPTH;
 const GENESIS: Epoch = Epoch::new(1);
 
 type Op = AgoraState<StubProver, DEPTH>;
@@ -61,14 +61,14 @@ fn the_whole_lifecycle_runs_in_two_agoras_that_share_nothing() {
 
     // Alice founds A; Erin founds B. Both agoras opt into the transparency log — with
     // different log keys, since nothing may be shared.
-    let mut alice = Member::enroll(0x11, agora_a, tier_a, GENESIS);
+    let mut alice = Member::<DEPTH>::enroll(0x11, agora_a, tier_a, GENESIS);
     let mut op_a: Op = found(&mut alice, 0x1b, Some(0x1c));
-    let mut erin = Member::enroll(0x21, agora_b, tier_b, GENESIS);
+    let mut erin = Member::<DEPTH>::enroll(0x21, agora_b, tier_b, GENESIS);
     let mut op_b: Op = found(&mut erin, 0x2b, Some(0x2c));
 
     // ---- Dana joins both — same seed, adversarially (§5.1, proposal 0013). ----
-    let mut dana_a = Member::enroll(0x33, agora_a, tier_a, GENESIS);
-    let mut dana_b = Member::enroll(0x33, agora_b, tier_b, GENESIS);
+    let mut dana_a = Member::<DEPTH>::enroll(0x33, agora_a, tier_a, GENESIS);
+    let mut dana_b = Member::<DEPTH>::enroll(0x33, agora_b, tier_b, GENESIS);
     assert_ne!(
         dana_a.leaf, dana_b.leaf,
         "one person's leaves correlated across agoras"
@@ -76,7 +76,7 @@ fn the_whole_lifecycle_runs_in_two_agoras_that_share_nothing() {
 
     admit(&mut op_a, &mut dana_a, &[&alice], 0x51);
     admit(&mut op_b, &mut dana_b, &[&erin], 0x52);
-    let mut bob = Member::enroll(0x12, agora_a, tier_a, GENESIS);
+    let mut bob = Member::<DEPTH>::enroll(0x12, agora_a, tier_a, GENESIS);
     admit(&mut op_a, &mut bob, &[&alice], 0x53);
     advance(&mut op_a, &mut [&mut alice, &mut dana_a, &mut bob]);
     advance(&mut op_b, &mut [&mut erin, &mut dana_b]);
@@ -333,7 +333,11 @@ fn the_whole_lifecycle_runs_in_two_agoras_that_share_nothing() {
         .migrate(tier_b, &mig_proof, spend, migrated.commitment)
         .expect("accepted");
     let bulletin_b = op_b.advance_epoch().unwrap();
-    assert!(bulletin_b.spent.contains(spend.as_bytes()));
+    assert!(bulletin_b
+        .spent
+        .contains(&nymora_accumulator::exclusion::truncate_key(
+            spend.as_bytes()
+        )));
     erin.apply_bulletin(&bulletin_b);
 
     // The successor acts in B; A's spend set never moved.
@@ -420,7 +424,7 @@ fn the_whole_lifecycle_runs_in_two_agoras_that_share_nothing() {
 
     // Fresh hardware, fresh everything, the standard vouch flow — and no continuity: the
     // new credential shares nothing with the old leaf (§9.3's accepted cost).
-    let mut dana_a_new = Member::enroll(0x37, agora_a, tier_a, op_a.current_epoch());
+    let mut dana_a_new = Member::<DEPTH>::enroll(0x37, agora_a, tier_a, op_a.current_epoch());
     assert_ne!(dana_a_new.leaf, old_dana_leaf);
     admit(&mut op_a, &mut dana_a_new, &[&alice], 0x54);
     advance(&mut op_a, &mut [&mut alice, &mut dana_a_new]);

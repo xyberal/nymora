@@ -11,14 +11,10 @@ publish.workspace = true
 workspace = true
 
 [features]
-default = ["provisional-algebraic-hash"]
-# Accumulator nodes are recomputed inside the circuit, so they belong to the algebraic hash
-# family (§6.5) — which is not yet chosen. Without the stand-in there is no hash to build a
-# tree from, so `--no-default-features` leaves this crate empty rather than partly working.
-provisional-algebraic-hash = ["nymora-crypto/provisional-algebraic-hash"]
-# Tree construction, for an operator. Needs an allocator, which the verification half does
-# not, so it is off by default and the member-side build stays allocation-free.
-build = ["provisional-algebraic-hash"]
+# Tree and set construction, for an operator and for the member's local rebuild of the
+# exclusion sets. Needs an allocator, which the verification half does not, so it is off
+# by default and the member-side proving path stays allocation-free.
+build = []
 
 [dependencies]
 nymora-core = { path = "../nymora-core" }

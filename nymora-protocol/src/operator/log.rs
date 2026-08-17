@@ -25,7 +25,8 @@
 //! last saw). The member key hierarchy is the wrong tool for signing heads — those keys
 //! are private witnesses (§9.1). The head key is operator-held log material: it exists
 //! to make the *log* non-repudiable by its operator, not to say anything about members.
-//! It uses the provisional signature and is as replaceable as the scheme itself.
+//! It signs with the protocol's one signature scheme (§9.1, proposal 0035), over the
+//! byte-family head digest entered into the field by the identifier rule.
 //!
 //! # What an auditor gets
 //!
@@ -137,7 +138,7 @@ pub struct SignedHead {
     pub head: [u8; 32],
     /// The log key's signature over the canonical head payload.
     ///
-    /// Sized by the provisional scheme; like every signature in the workspace, its width
+    /// Sized by the certificate scheme; like every signature in the workspace, its width
     /// is deliberately unpinned by anything but the scheme itself.
     pub signature: [u8; SIGNATURE_LEN],
 }
@@ -151,9 +152,12 @@ pub struct TransparencyLog {
 
 impl TransparencyLog {
     /// A fresh log keyed by an operator-held seed (see the module documentation).
+    ///
+    /// The signing scalar is minted from the seed by the truncation rule (proposal
+    /// 0035), so the key is canonical by construction.
     pub(super) fn new(seed: [u8; 32]) -> Self {
         Self {
-            seed: SecretBytes::new(seed),
+            seed: SecretBytes::new(signature::mint_signing_secret(seed)),
             entries: Vec::new(),
             heads: Vec::new(),
         }
@@ -164,9 +168,8 @@ impl TransparencyLog {
         let prev = self.heads.last().map_or([0u8; 32], |h| h.head);
         let head = chain_step(&prev, &entry);
         let sequence = self.entries.len() as u64;
-        let signature = signature::sign(self.seed.expose(), |absorb| {
-            head_payload(sequence, &head, absorb);
-        });
+        let signature = signature::sign(self.seed.expose(), &head_message(sequence, &head))
+            .expect("minted keys are canonical");
         self.entries.push(entry);
         self.heads.push(SignedHead {
             sequence,
@@ -178,7 +181,7 @@ impl TransparencyLog {
     /// The key auditors verify heads against — the one public fact identifying this log.
     #[must_use]
     pub fn public_key(&self) -> [u8; PUBLIC_KEY_LEN] {
-        signature::public_key(self.seed.expose())
+        signature::public_key(self.seed.expose()).expect("minted keys are canonical")
     }
 
     /// Every entry, in order. Public by definition.
@@ -204,19 +207,24 @@ fn chain_step(prev: &[u8; 32], entry: &LogEntry) -> [u8; 32] {
         .finalize()
 }
 
-/// The canonical bytes a head signature covers: the head domain tag, the sequence, the
-/// head. Fixed widths after the tag — nothing here is attacker-length-controlled.
-fn head_payload(sequence: u64, head: &[u8; 32], absorb: &mut dyn FnMut(&[u8])) {
-    absorb(Domain::TransparencyHead.tag().as_bytes());
-    absorb(&sequence.to_le_bytes());
-    absorb(head);
+/// The message a head signature covers: the byte-family digest of the domain-tagged
+/// sequence and head, entered into the field by the identifier rule (proposal 0035).
+/// One signature scheme serves the whole protocol; what varies is only how each message
+/// reaches its field element — circuit-verified certificates compress by the algebraic
+/// hash, software-verified statements like this one digest in the byte family first.
+fn head_message(sequence: u64, head: &[u8; 32]) -> nymora_crypto::F {
+    let digest = ByteHasher::new(Domain::TransparencyHead)
+        .absorb(&sequence.to_le_bytes())
+        .absorb(head)
+        .finalize();
+    nymora_crypto::field::from_id(&digest)
 }
 
 /// Whether a signed head verifies under a log key, on its own.
 fn head_verifies(head: &SignedHead, public_key: &[u8]) -> bool {
     signature::verify(
         public_key,
-        |absorb| head_payload(head.sequence, &head.head, absorb),
+        &head_message(head.sequence, &head.head),
         &head.signature,
     )
 }

@@ -88,15 +88,15 @@ pub struct RootMaterialWritten {
 
 /// A credential's root authority.
 ///
-/// # Sign exactly the canonical bytes
+/// # Sign exactly the canonical message
 ///
 /// Both signing methods take a payload type from `nymora-core`, and an implementation **must**
-/// sign exactly its canonical encoding — [`EpochCertPayload::encode`] /
-/// [`MigrationCertPayload::encode`], or the identical byte sequence streamed through
-/// `encode_parts` — nothing more, nothing less, and never a layout of its own. Both
-/// certificates are recomputed and verified inside the standardized circuit (§6.5), so a
-/// backend with a private layout produces proofs no other implementation can verify, or a
-/// per-backend proof shape — the fingerprinting §6.5 exists to prevent.
+/// sign exactly its canonical compressed message — the Poseidon compression of the payload
+/// stated in §9.1 and computed by `nymora-crypto` (proposal 0035) — never a message of its
+/// own devising. Both certificates are recomputed and verified inside the standardized
+/// circuit (§6.5), so a backend with a private message produces proofs no other
+/// implementation can verify, or a per-backend proof shape — the fingerprinting §6.5
+/// exists to prevent.
 ///
 /// The encoding carries the agora and the certificate kind's domain tag inside the signed
 /// message, so the two properties earlier revisions of this trait could only exhort —
@@ -136,8 +136,8 @@ pub trait KeyStore {
 
     /// Signs a certificate binding a generated epoch key to this credential (§9.1).
     ///
-    /// The signed message is exactly the payload's canonical encoding — see the trait
-    /// documentation. Returns the number of bytes written to `signature`.
+    /// The signed message is exactly the payload's canonical compressed message — see the
+    /// trait documentation. Returns the number of bytes written to `signature`.
     ///
     /// # Errors
     ///
@@ -152,8 +152,8 @@ pub trait KeyStore {
     ///
     /// The successor's public key is in the same encoding
     /// [`create_root`](KeyStore::create_root) produces, and the signed message is exactly the
-    /// payload's canonical encoding — see the trait documentation. Returns the number of bytes
-    /// written to `signature`.
+    /// payload's canonical compressed message — see the trait documentation. Returns the
+    /// number of bytes written to `signature`.
     ///
     /// The protocol requires this to be usable once: the old leaf is consumed by a migration
     /// nullifier derived from `sk_cred` and the leaf itself, so a second successor cannot be
@@ -191,9 +191,9 @@ mod tests {
     /// implicit in the key.
     ///
     /// A certificate that did not name its epoch would verify in any epoch — the
-    /// forward-secrecy bound of §9.1 expressed as a signed field — and one that did not name
-    /// its agora would replay into another (§16.1). The canonical encoding these feed is
-    /// pinned in `nymora-core`.
+    /// forward-secrecy bound of §9.1 expressed as a signed input — and one that did not name
+    /// its agora would replay into another (§16.1). The canonical message these feed is
+    /// pinned in `nymora-crypto`.
     #[test]
     fn an_epoch_cert_names_its_epoch_and_agora() {
         let payload = EpochCertPayload {

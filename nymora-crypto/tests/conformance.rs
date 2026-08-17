@@ -11,14 +11,13 @@
 //! outside this file needs to name these shapes.
 
 use nymora_core::{
-    AgoraId, CeremonyMode, Commitment, Domain, Epoch, MessageHash, Nullifier, PublicParameters,
-    SessionContext, TagKey,
+    AgoraId, CeremonyMode, Commitment, CredentialKey, Domain, Epoch, EpochSecretKey, MessageHash,
+    Nullifier, PublicParameters, RootOpening, SessionContext, TagKey,
 };
-#[cfg(feature = "provisional-algebraic-hash")]
-use nymora_core::{CredentialKey, EpochSecretKey, RootOpening};
-use nymora_crypto::{agora_id, derive_tag_key, kdf, live_auth, policy_class, tag, ByteHasher};
-#[cfg(feature = "provisional-algebraic-hash")]
-use nymora_crypto::{commit, nullifier};
+use nymora_crypto::{
+    agora_id, commit, derive_tag_key, field, kdf, live_auth, nullifier, policy_class, signature,
+    tag, ByteHasher,
+};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -78,20 +77,13 @@ fn every_vector_matches() {
 
     let mut checked = 0usize;
     for construction in &suite.constructions {
-        assert!(
-            matches!(construction.status.as_str(), "settled" | "provisional"),
-            "{} has an unrecognised status `{}`",
+        assert_eq!(
+            construction.status.as_str(),
+            "settled",
+            "{} carries an unrecognised status `{}` — nothing is provisional after the swap              (proposal 0035)",
             construction.name,
             construction.status
         );
-
-        // Without the stand-in there is no algebraic hash, so the provisional constructions do
-        // not exist to check. The settled ones still run, which makes the distinction in
-        // `vectors/README.md` visible at build level rather than only in prose.
-        #[cfg(not(feature = "provisional-algebraic-hash"))]
-        if construction.status == "provisional" {
-            continue;
-        }
 
         for case in &construction.cases {
             match construction.name.as_str() {
@@ -191,7 +183,6 @@ fn every_vector_matches() {
                     );
                 }
 
-                #[cfg(feature = "provisional-algebraic-hash")]
                 "pseudonym" => {
                     let derived = live_auth::pseudonym(
                         &EpochSecretKey::new(array(case, "key")),
@@ -201,18 +192,56 @@ fn every_vector_matches() {
                     check(&construction.name, case, derived.as_bytes());
                 }
 
-                #[cfg(feature = "provisional-algebraic-hash")]
                 "commit" => {
                     let leaf = commit(
                         &bytes(case, "pk_root"),
                         &CredentialKey::new(array(case, "sk_cred")),
                         &RootOpening::new(array(case, "r_root")),
                         &AgoraId::from_bytes(array(case, "agora_id")),
-                    );
+                    )
+                    .expect("the vector's root key is a subgroup point");
                     check(&construction.name, case, leaf.as_bytes());
                 }
 
-                #[cfg(feature = "provisional-algebraic-hash")]
+                "epoch_cert_message" => {
+                    let message = signature::epoch_cert_message(
+                        &AgoraId::from_bytes(array(case, "agora_id")),
+                        Epoch::new(case["epoch"].as_u64().expect("epoch is a number")),
+                        &bytes(case, "epoch_public_key"),
+                    )
+                    .expect("the vector's key is a subgroup point");
+                    check(&construction.name, case, &field::to_bytes(&message));
+                }
+
+                "migration_cert_message" => {
+                    let message = signature::migration_cert_message(
+                        &AgoraId::from_bytes(array(case, "agora_id")),
+                        &bytes(case, "successor_public_key"),
+                    )
+                    .expect("the vector's key is a subgroup point");
+                    check(&construction.name, case, &field::to_bytes(&message));
+                }
+
+                // The one construction whose output is 64 bytes: the certificate
+                // signature, deterministic by §9.1's nonce obligation.
+                "certificate_sign" => {
+                    let sk = array(case, "sk");
+                    let message =
+                        field::decode(&array(case, "message_field")).expect("canonical message");
+                    let signed =
+                        signature::sign(&sk, &message).expect("the vector's key is canonical");
+                    assert_eq!(
+                        signed.as_slice(),
+                        bytes(case, "output"),
+                        "certificate_sign does not match its vector"
+                    );
+                    let pk = bytes(case, "public_key");
+                    assert!(
+                        signature::verify(&pk, &message, &signed),
+                        "the vector signature does not verify under its own key"
+                    );
+                }
+
                 "nullifier" => {
                     let produced: Nullifier = match case["context"].as_str().expect("context") {
                         "vouch" => nullifier::vouch(
@@ -248,12 +277,7 @@ fn every_vector_matches() {
 
     // A harness that silently ran nothing would pass forever. Cheap insurance, and the same
     // failure the secret scan was once found to have.
-    assert!(checked >= 14, "only {checked} settled vectors ran");
-    #[cfg(feature = "provisional-algebraic-hash")]
-    assert!(
-        checked >= 20,
-        "only {checked} vectors ran with the stand-in enabled"
-    );
+    assert!(checked >= 23, "only {checked} vectors ran");
 }
 
 /// A `Commitment` is not a `Nullifier` even where the bytes coincide, and the vectors must not

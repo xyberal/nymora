@@ -11,24 +11,12 @@ publish.workspace = true
 workspace = true
 
 [features]
-default = ["provisional-algebraic-hash", "stub-prover"]
-# The statement types embed the provisional witness structures (positional and exclusion),
-# and every clause is expressed over the stand-in algebraic hash — so the statements
-# themselves are gated, exactly like the values they quantify over.
-provisional-algebraic-hash = [
-    "nymora-crypto/provisional-algebraic-hash",
-    "nymora-accumulator/provisional-algebraic-hash",
-]
-# The stub prover: a plaintext evaluator of the exact statements, for building and testing
-# everything above the proof boundary before the real circuit exists. Its proofs contain
-# the witness in the clear — see the module documentation — and must never leave a test
-# process. It additionally needs the provisional signature, since two of the clauses verify
-# root-key signatures.
-stub-prover = [
-    "provisional-algebraic-hash",
-    "nymora-crypto/provisional-signature",
-    "dep:sha2",
-]
+default = ["stub-prover"]
+# The stub prover: a plaintext evaluator of the exact statements over the real
+# primitives, for testing everything above the proof boundary without paying for
+# proving. Its proofs contain the witness in the clear — see the module documentation —
+# and must never leave a test process.
+stub-prover = ["dep:sha2"]
 
 [dependencies]
 nymora-core = { path = "../nymora-core" }

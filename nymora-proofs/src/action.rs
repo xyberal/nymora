@@ -325,12 +325,15 @@ pub fn prove_migration<S: ProofSystem<DEPTH>, const DEPTH: usize>(
     revocation_root: Root,
     successor_commitment: Commitment,
 ) -> Result<(S::MigrationProof, Nullifier), ProtocolError> {
+    // A root key that names no subgroup point commits to nothing — the caller's own
+    // material is unusable, which is the same refusal an unsatisfiable witness gets.
     let old_leaf = commit(
         witness.old_root_public_key,
         witness.credential_key,
         witness.old_root_opening,
         &agora,
-    );
+    )
+    .ok_or(ProtocolError::Malformed)?;
     let spend = nullifier::migration(witness.credential_key, &old_leaf, &agora);
     let public = MigrationPublicInputs {
         agora,

@@ -13,11 +13,11 @@
 //! # Two families in one session
 //!
 //! The pseudonym is recomputed **inside the circuit** — the proof statement includes
-//! "`pseudonym_i` correctly derived" (§8.1) — so [`pseudonym`] is in the algebraic family
-//! and sits behind the provisional feature. Everything else here is checked by peers and by
-//! people, never by a circuit: [`commitment`] is recomputed by peers at reveal,
-//! [`context`] by every participant independently, and [`sas`] is read aloud (§8.3). Those
-//! are byte-family, settled now, and their vectors are permanent.
+//! "`pseudonym_i` correctly derived" (§8.1) — so [`pseudonym`] is the algebraic family:
+//! the uniform action derivation at its own tag (proposal 0035). Everything else here is
+//! checked by peers and by people, never by a circuit: [`commitment`] is recomputed by
+//! peers at reveal, [`context`] by every participant independently, and [`sas`] is read
+//! aloud (§8.3). Those are byte-family, and their vectors are permanent.
 //!
 //! # Why the SAS truncation is pinned here
 //!
@@ -26,13 +26,13 @@
 //! pinned by [`SAS_LEN`] and its vector. How the bytes render — digits, words, emoji — is
 //! the client's presentation and deliberately unpinned.
 
+use crate::field::{self, F};
 use crate::hash::ByteHasher;
-use nymora_core::{Domain, SessionCommitment, SessionContext};
-
-#[cfg(feature = "provisional-algebraic-hash")]
-use crate::algebraic::AlgebraicHasher;
-#[cfg(feature = "provisional-algebraic-hash")]
-use nymora_core::{AgoraId, EpochSecretKey, SessionPseudonym};
+use crate::poseidon;
+use nymora_core::{
+    field_domain, AgoraId, Domain, EpochSecretKey, SessionCommitment, SessionContext,
+    SessionPseudonym,
+};
 
 /// Width of a session nonce and of its blinding, in bytes.
 ///
@@ -112,21 +112,22 @@ pub fn sas(context: &SessionContext) -> [u8; SAS_LEN] {
 /// nullifier derivation (proposals 0013, 0017): distinctness across agoras must not rest
 /// on every participant's randomness being correct.
 ///
-/// The circuit recomputes this value, so it is algebraic-family and provisional.
-#[cfg(feature = "provisional-algebraic-hash")]
+/// The circuit recomputes this value, so it is the uniform action derivation at tag 3
+/// (proposal 0035): `Poseidon(ACTION, 3, sk_epoch, context_id, agora_id)`, the context
+/// entering the field by the identifier rule.
 #[must_use]
 pub fn pseudonym(
     key: &EpochSecretKey,
     context: &SessionContext,
     agora: &AgoraId,
 ) -> SessionPseudonym {
-    SessionPseudonym::from_bytes(
-        AlgebraicHasher::new(Domain::LiveAuthPseudonym)
-            .absorb(key.expose())
-            .absorb(context.as_bytes())
-            .absorb(agora.as_bytes())
-            .finalize(),
-    )
+    SessionPseudonym::from_bytes(field::to_bytes(&poseidon::hash(&[
+        F::from(field_domain::ACTION),
+        F::from(field_domain::action_tag::LIVE_AUTH),
+        field::from_witness_bytes(key.expose()),
+        field::from_id(context.as_bytes()),
+        field::from_id(agora.as_bytes()),
+    ])))
 }
 
 #[cfg(test)]
@@ -186,7 +187,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "provisional-algebraic-hash")]
     mod pseudonym {
         use super::super::pseudonym;
         use nymora_core::{AgoraId, EpochSecretKey, SessionContext};

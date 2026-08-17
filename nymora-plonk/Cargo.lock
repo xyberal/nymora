@@ -123,6 +123,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "bls12_381"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7bc6d6292be3a19e6379786dac800f551e5865a5bb51ebbe3064ab80433f403"
+dependencies = [
+ "ff",
+ "rand_core",
+ "subtle",
+]
+
+[[package]]
 name = "blst"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -582,6 +593,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "jubjub"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8499f7a74008aafbecb2a2e608a3e13e4dd3e84df198b604451efe93f2de6e61"
+dependencies = [
+ "bitvec",
+ "bls12_381",
+ "ff",
+ "group",
+ "rand_core",
+ "subtle",
+]
+
+[[package]]
 name = "k256"
 version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -785,8 +810,12 @@ dependencies = [
 name = "nymora-crypto"
 version = "0.0.0"
 dependencies = [
+ "bls12_381",
+ "ff",
+ "group",
  "hkdf",
  "hmac",
+ "jubjub",
  "nymora-core",
  "sha2",
  "subtle",
@@ -804,10 +833,24 @@ dependencies = [
  "midnight-proofs",
  "midnight-zk-stdlib",
  "num-bigint",
+ "nymora-accumulator",
  "nymora-circuits",
+ "nymora-core",
+ "nymora-crypto",
+ "nymora-proofs",
  "rand",
  "rand_chacha",
  "sha2",
+]
+
+[[package]]
+name = "nymora-proofs"
+version = "0.0.0"
+dependencies = [
+ "nymora-accumulator",
+ "nymora-circuits",
+ "nymora-core",
+ "nymora-crypto",
 ]
 
 [[package]]

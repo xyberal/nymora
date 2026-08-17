@@ -1,6 +1,6 @@
 # Proposal 0035 — The derivations cross into the field
 
-**Status:** Draft
+**Status:** **Applied** — the sections below are now normative in the specification
 **Affects:** §5.2, §6.5, §9.1, §9.3, §15
 **Builds on:** [proposal 0034](0034-the-circuit-instances-are-pinned.md) (the
 Poseidon instance, the certificate equation, and the reference string — whose open
@@ -147,6 +147,17 @@ agora is inside the signed message, the two certificate kinds cannot collide
 input is one field element, arity-pinned). The signature itself is the §9.1
 equation over `m`, with the deterministic nonce derived as
 `k = reduce(Poseidon(NONCE, sk, m))`.
+
+**One signature scheme serves the software-verified statements too.** The
+transparency-log heads (§10.1) and the boundary bulletin (§11, proposal 0024) are
+signed by operator keys and verified in software, never in a circuit — any secure
+scheme would do, and that is exactly why they take the same one: a second permanent
+scheme would buy nothing but a second implementation surface. Their messages stay
+byte-family — the domain-tagged digests those sections already define — and enter
+the field by the identifier rule of decision 1 before signing. What varies across
+the protocol is only how a message reaches its field element: circuit-verified
+certificates compress by the algebraic hash; software-verified statements digest in
+the byte family first.
 
 ### 4. The numeric domain registry
 

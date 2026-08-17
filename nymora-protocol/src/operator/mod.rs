@@ -252,8 +252,8 @@ pub struct AgoraState<S: ProofSystem<DEPTH>, const DEPTH: usize> {
     epoch: Epoch,
     governance_quorum: u32,
     classes: BTreeMap<PolicyClass, ClassState<DEPTH>>,
-    revocations: ExclusionSet,
-    spends: ExclusionSet,
+    revocations: ExclusionSet<DEPTH>,
+    spends: ExclusionSet<DEPTH>,
     staged: Staged,
     pending: BTreeSet<Commitment>,
     sessions: BTreeMap<SessionId, VouchSession>,
@@ -314,7 +314,9 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
             challenges: BTreeSet::new(),
             history: BTreeMap::new(),
             tag_secret: SecretBytes::new(tag_secret.take()),
-            statement_seed: SecretBytes::new(statement_entropy.take()),
+            statement_seed: SecretBytes::new(signature::mint_signing_secret(
+                statement_entropy.take(),
+            )),
             log: log_seed.map(|seed| TransparencyLog::new(seed.take())),
             dissolved: false,
         };
@@ -369,7 +371,7 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
     /// neither can be bootstrapped from the channel the bulletin arrives on.
     #[must_use]
     pub fn statement_key(&self) -> [u8; PUBLIC_KEY_LEN] {
-        signature::public_key(self.statement_seed.expose())
+        signature::public_key(self.statement_seed.expose()).expect("minted keys are canonical")
     }
 
     /// The inclusion witness for a landed leaf, by its permanent position, under the
@@ -564,8 +566,8 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
             .iter()
             .map(|(class, root)| (*class, *root))
             .collect();
-        let revoked: Vec<[u8; 32]> = self.revocations.keys().copied().collect();
-        let spent: Vec<[u8; 32]> = self.spends.keys().copied().collect();
+        let revoked: Vec<[u8; 32]> = self.revocations.keys().collect();
+        let spent: Vec<[u8; 32]> = self.spends.keys().collect();
         let tag_key = self.tag_key_now();
         let witness_key = self.witness_key_now();
         let head = self
@@ -590,7 +592,11 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
             head: head.as_ref(),
         }
         .digest();
-        let signature = signature::sign(self.statement_seed.expose(), |absorb| absorb(&digest));
+        let signature = signature::sign(
+            self.statement_seed.expose(),
+            &nymora_crypto::field::from_id(&digest),
+        )
+        .expect("minted keys are canonical");
         Bulletin {
             epoch: self.epoch,
             class_roots,

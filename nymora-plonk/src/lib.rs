@@ -12,14 +12,14 @@
 //! [`backend::Backend`] holds the reference string and both key pairs, and refuses
 //! unsatisfiable witnesses the way the `ProofSystem` contract requires.
 //!
-//! # What this crate is not, yet
+//! # Behind the boundary
 //!
-//! It does not stand behind `nymora-circuits`' `ProofSystem` trait: that boundary's
-//! witness types are the provisional byte-oriented ones, and swapping them — with the
-//! provisional hash and signature retiring and every conformance vector regenerating —
-//! is one synchronized specification+code+vectors change, deliberately separate from
-//! this crate's landing (proposals 0033, 0034). Until then this crate builds and
-//! proves standalone, and its tests are the evidence the swap will build on.
+//! [`backend::Backend`] implements `nymora-circuits`' `ProofSystem` trait ([`system`]),
+//! so the whole workspace drives these circuits through the same interface it drove
+//! the stub through (proposal 0035). The workspace's own primitives are the CPU twins
+//! of what the circuits constrain — same Poseidon instance, same certificate scheme,
+//! same trees — and the parity suite in this crate pins the two implementations
+//! against each other value for value.
 //!
 //! # Where the trust sits
 //!
@@ -40,6 +40,7 @@ pub mod exclusion;
 mod gadgets;
 pub mod migration;
 pub mod primitives;
+pub mod system;
 pub mod tree;
 
 pub use evaluate::{satisfies_chain, satisfies_migration};

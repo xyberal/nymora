@@ -28,9 +28,7 @@ use crate::credential::{load_epoch_record, load_secret32, EpochRecord};
 use nymora_core::{AgoraId, CredentialKey, Epoch, EpochSecretKey, ProtocolError, RootOpening};
 use nymora_ports::{SecureStorage, Slot};
 
-#[cfg(feature = "provisional-algebraic-hash")]
 use nymora_accumulator::{AbsenceWitness, Witness};
-#[cfg(feature = "provisional-algebraic-hash")]
 use nymora_circuits::ChainWitness;
 
 /// A member's stored proof material for acting at one epoch.
@@ -90,13 +88,12 @@ impl<'a> ActingMaterial<'a> {
     /// structure witnesses the host fetched from Skiora.
     ///
     /// The result borrows from both; hand it to `nymora-proofs` with the action's inputs.
-    #[cfg(feature = "provisional-algebraic-hash")]
     #[must_use]
     pub fn witness<'w, const DEPTH: usize>(
         &'w self,
         leaf_witness: &'w Witness<DEPTH>,
-        revocation_absence: &'w AbsenceWitness,
-        spend_absence: &'w AbsenceWitness,
+        revocation_absence: &'w AbsenceWitness<DEPTH>,
+        spend_absence: &'w AbsenceWitness<DEPTH>,
     ) -> ChainWitness<'w, DEPTH> {
         ChainWitness {
             epoch_key: &self.epoch_key,

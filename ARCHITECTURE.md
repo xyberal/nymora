@@ -62,32 +62,40 @@ vector the design closes. A single core compiled to every target makes that unif
 structural.
 
 The same reasoning applies to nullifier derivation, Fiat–Shamir challenges, domain
-separation, and the canonical certificate payload encodings (§9.1, §9.3): these must agree
-bit-for-bit across every implementation or the protocol simply fails to interoperate.
+separation, the field-entry rules, and the compressed certificate messages (§6.5, §9.1,
+§9.3; proposal 0035): these must agree bit-for-bit across every implementation or the
+protocol simply fails to interoperate.
 
 ## Crate graph
 
 ```
-nymora-core          types, wire formats, domain registry, errors
-   ├── nymora-crypto        hashing (byte + provisional algebraic), commitments,
-   │                        nullifiers, tags, KDF, identifier and live-auth
-   │                        derivations, the provisional signature
-   │      ├── nymora-accumulator    positional accumulator (§5.2) and the keyed
+nymora-core          types, wire formats, both domain registries, errors
+   ├── nymora-crypto        the two hash families (byte; the pinned Poseidon
+   │                        instance), the field crossing, commitments, nullifiers,
+   │                        the §9.1 certificate scheme, tags, KDF, identifier and
+   │                        live-auth derivations
+   │      ├── nymora-accumulator    positional accumulator (§5.2) and the gap-tree
    │      │        │                exclusion sets with non-membership witnesses
    │      │        │                (§9.1, §11)
    │      └────────┴── nymora-circuits   the two proof statements as types, the
-   │             │                       `ProofSystem` boundary, and — until the
-   │             │                       real circuit — the stub prover (§6.5)
+   │             │                       `ProofSystem` boundary, and the stub
+   │             │                       evaluator for tests (§6.5)
    │             └── nymora-proofs       the per-action prove/verify surface
    └── nymora-ports         KeyStore / SecureStorage
-                            (`software-key-store` also uses the provisional
-                             signature from nymora-crypto)
+                            (`software-key-store` signs with the certificate
+                             scheme from nymora-crypto)
 
 nymora-protocol      credential lifecycle (§9.1–§9.3), witness assembly into the
    │                 statements, the member-side live-auth machine (§8), the shared
    │                 quorum-decision subjects — and, behind the `operator` feature,
    │                 the whole Skiora role of §4–§12 (`AgoraState`)
    └── depends on everything above, including the ports
+
+nymora-plonk         the real proving backend, standalone beside the workspace: both
+                     statements as circuits over the heavy std proving stack,
+                     implementing the `ProofSystem` boundary (proposal 0035) — plus
+                     the parity suite pinning the workspace primitives against the
+                     proving stack's own, value for value
 ```
 
 Dependencies point one way only. `nymora-protocol` is the top of the graph: it defines the

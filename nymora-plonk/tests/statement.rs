@@ -447,9 +447,9 @@ fn migration_proves_and_a_laundered_successor_cannot() {
     };
 
     let proof = backend()
-        .prove_migration(&witness, &instance)
+        .prove_migration_statement(&witness, &instance)
         .expect("a satisfied migration must prove");
-    assert!(backend().verify_migration(&proof, &instance));
+    assert!(backend().verify_migration_statement(&proof, &instance));
 
     // Laundering: a successor commitment over a fresh credential key must not prove,
     // and the valid proof must not verify against it.
@@ -464,16 +464,20 @@ fn migration_proves_and_a_laundered_successor_cannot() {
         ]),
         ..instance
     };
-    assert!(backend().prove_migration(&witness, &laundered).is_err());
-    assert!(!backend().verify_migration(&proof, &laundered));
+    assert!(backend()
+        .prove_migration_statement(&witness, &laundered)
+        .is_err());
+    assert!(!backend().verify_migration_statement(&proof, &laundered));
 
     // And a wrong spend nullifier is refused the same way.
     let wrong_spend = MigrationInstance {
         spend_nullifier: F::from(0xbad),
         ..instance
     };
-    assert!(backend().prove_migration(&witness, &wrong_spend).is_err());
-    assert!(!backend().verify_migration(&proof, &wrong_spend));
+    assert!(backend()
+        .prove_migration_statement(&witness, &wrong_spend)
+        .is_err());
+    assert!(!backend().verify_migration_statement(&proof, &wrong_spend));
 }
 
 #[test]
@@ -521,9 +525,9 @@ fn a_revoked_credential_cannot_migrate() {
             world.instance_base.agora,
         ]),
     };
-    match backend().prove_migration(&witness, &instance) {
+    match backend().prove_migration_statement(&witness, &instance) {
         Err(_) => {}
-        Ok(proof) => assert!(!backend().verify_migration(&proof, &instance)),
+        Ok(proof) => assert!(!backend().verify_migration_statement(&proof, &instance)),
     }
 }
 
