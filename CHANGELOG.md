@@ -37,6 +37,15 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   compression §9.1 gives, `Poseidon(MIGRATION_CERT, agora_id, pk_root_new.x,
   pk_root_new.y)`. Prose only: the code and conformance vectors already computed the
   field form.
+- **Threat model §15 sharpened on two residuals.** The durable-key section stated the
+  vouching, policy, and migration nullifiers are all never published; it now carves out
+  the migration spend nullifier, which is published in the boundary broadcast by
+  construction so members can prove non-membership — so testing whether a credential has
+  migrated needs only a cached bulletin and the key, no live operator, and that is named
+  as the key's least-bounded reach. Separately, the inclusion-witness position is now
+  named explicitly as a durable per-member identifier the operator sees each epoch,
+  defended only at the transport layer (§16.2). Both are acknowledgements sharpened, not
+  mechanism changes.
 
 ### Added
 - **The circuit's concrete instances are pinned** (§5.2, §6.5, §9.1; proposal 0034,
