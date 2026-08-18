@@ -207,6 +207,12 @@ struct VouchSession {
 struct Proposal {
     decision: crate::decision::Decision,
     approving_class: PolicyClass,
+    /// The epoch the proposal was raised in — the value `subject_id` was derived under.
+    /// Stored rather than read back as the current epoch: a proposal cannot outlive its
+    /// epoch (it is cleared at the boundary), so the two coincide today, but binding the
+    /// served `opened` to the derivation's own input keeps a member's recomputation
+    /// correct by construction rather than by that coincidence.
+    opened: Epoch,
     nonce: [u8; 32],
     approvals: BTreeSet<Nullifier>,
 }

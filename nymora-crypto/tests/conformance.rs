@@ -118,6 +118,15 @@ fn every_vector_matches() {
                             parties: u16::from_le_bytes([encoded[3], encoded[4]]),
                         }
                     };
+                    // The vector's ceremony bytes must be canonical: re-encoding the decoded
+                    // mode has to reproduce them, so a non-canonical encoding (trailing bytes,
+                    // a mis-padded tag) fails here rather than being silently normalized by the
+                    // derivation below, which reads only the fields it needs.
+                    assert_eq!(
+                        ceremony.encode().as_slice(),
+                        encoded.as_slice(),
+                        "agora_id ceremony encoding is not canonical"
+                    );
                     let derived = agora_id::derive(&PublicParameters {
                         ceremony,
                         founding_key: &bytes(case, "founding_key"),

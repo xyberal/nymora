@@ -84,6 +84,7 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
             Proposal {
                 decision,
                 approving_class,
+                opened: self.epoch,
                 nonce,
                 approvals: BTreeSet::new(),
             },
@@ -101,7 +102,7 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
         Some(ProposalView {
             decision: proposal.decision,
             approving_class: proposal.approving_class,
-            opened: self.epoch,
+            opened: proposal.opened,
             nonce: proposal.nonce,
         })
     }
