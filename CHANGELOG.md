@@ -29,6 +29,15 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   every derived value 32. The stub prover remains the test backend, now evaluating
   the real primitives; retired byte-family domains stay registered as reserved.
 
+### Fixed
+- **§9.3's migration-certificate message description reconciled with §9.1** (proposal
+  0035). One sentence still described the signed message in the retired byte-framed
+  form — a domain tag and length-framed fields as in §6.6 — after 0035 compressed both
+  certificate payloads to a single field element. It now states the same Poseidon
+  compression §9.1 gives, `Poseidon(MIGRATION_CERT, agora_id, pk_root_new.x,
+  pk_root_new.y)`. Prose only: the code and conformance vectors already computed the
+  field form.
+
 ### Added
 - **The circuit's concrete instances are pinned** (§5.2, §6.5, §9.1; proposal 0034,
   applied). The three instance-level facts proposal 0033 left open are now named, each
