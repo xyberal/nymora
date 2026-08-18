@@ -11,11 +11,12 @@
 //! ```
 //!
 //! Each constant is stored as canonical little-endian u64 limbs and converted through
-//! `Scalar::from_raw` at use. The values are pinned three ways: the known-answer tests
+//! `Scalar::from_raw` at use. The values are pinned four ways: the known-answer tests
 //! in [`super`] (whose expected digests were computed by an independent implementation
-//! of the same instance), the conformance vectors, and a cross-check suite in the
-//! proving backend comparing this implementation against the circuit stack's own CPU
-//! hash, element for element.
+//! of the same instance), the conformance vectors, a cross-check suite in the proving
+//! backend comparing this implementation against the circuit stack's own CPU hash element
+//! for element, and a committed SHA-256 checksum over the whole table (proposal 0034) that
+//! a reviewer reproduces from the sage output — see the test at the foot of this file.
 
 /// Number of rounds, full and partial together.
 pub(super) const ROUNDS: usize = 68;
@@ -100,3 +101,49 @@ pub(super) const MDS: [[[u64; 4]; 3]; 3] = [
     [[0xd7f501cd31a8b374, 0xca74314b950fe7b1, 0x432a4ad76d3fae06, 0x404d21073985d14e], [0xf7fa1603955649f1, 0x73e9b2317679422f, 0x81bc620e9e524d4b, 0x0b2cc8704264c6bd], [0xe2a8fc8c637f1a1f, 0x6d0bb519834348b4, 0x5a9388c641035d49, 0x0fdf664da55059fa]],
     [[0xf95dc57e90c49140, 0x3197ad01b65a730a, 0x43e24a47f45c5d03, 0x5e1d3dbecda62143], [0x7dc7b9002f5aa78a, 0x44cb6d5fae8954f3, 0x931896e77ea5c612, 0x6bd72f9cfc53af9d], [0xbb4fb88ef99de0db, 0x1effbd9cd58e46d9, 0xcaf880a9054bef83, 0x4997c5aa3a5fa07b]],
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::{MDS, ROUND_CONSTANTS};
+    use sha2::{Digest, Sha256};
+
+    /// A compact fingerprint of the pinned constant table (proposal 0034's committed
+    /// checksum): SHA-256 over every round constant and then every MDS entry, each as its
+    /// canonical little-endian u64 limbs, in declaration order — round-major for the
+    /// constants, row-major for the matrix. A reviewer who regenerates the instance from
+    /// the sage invocation in the module header serializes the emitted integers the same
+    /// way and compares this one digest, instead of diffing 204 constants by eye. If a
+    /// single limb here moves, this digest moves — and so does every proof, since the
+    /// circuit computes over the same table.
+    #[test]
+    fn constants_match_their_committed_checksum() {
+        let mut hasher = Sha256::new();
+        for round in &ROUND_CONSTANTS {
+            for element in round {
+                for limb in element {
+                    hasher.update(limb.to_le_bytes());
+                }
+            }
+        }
+        for row in &MDS {
+            for element in row {
+                for limb in element {
+                    hasher.update(limb.to_le_bytes());
+                }
+            }
+        }
+        let digest: [u8; 32] = hasher.finalize().into();
+        assert_eq!(
+            digest, CONSTANTS_CHECKSUM,
+            "the Grain-generated constant table has changed"
+        );
+    }
+
+    /// SHA-256 of the serialized table, as documented above:
+    /// `10f73e96a4a7d0cedd820d318243c533981a5a09af84ca31e4dda7acf303f91b`.
+    const CONSTANTS_CHECKSUM: [u8; 32] = [
+        0x10, 0xf7, 0x3e, 0x96, 0xa4, 0xa7, 0xd0, 0xce, 0xdd, 0x82, 0x0d, 0x31, 0x82, 0x43, 0xc5,
+        0x33, 0x98, 0x1a, 0x5a, 0x09, 0xaf, 0x84, 0xca, 0x31, 0xe4, 0xdd, 0xa7, 0xac, 0xf3, 0x03,
+        0xf9, 0x1b,
+    ];
+}

@@ -15,8 +15,8 @@ use nymora_core::{
     Nullifier, PublicParameters, RootOpening, SessionContext, TagKey,
 };
 use nymora_crypto::{
-    agora_id, commit, derive_tag_key, field, kdf, live_auth, nullifier, policy_class, signature,
-    tag, ByteHasher,
+    agora_id, commit, derive_tag_key, derive_witness_key, field, kdf, live_auth, nullifier,
+    policy_class, signature, tag, ByteHasher,
 };
 use serde::Deserialize;
 
@@ -135,6 +135,15 @@ fn every_vector_matches() {
 
                 "derive_tag_key" => {
                     let derived = derive_tag_key(
+                        &bytes(case, "agora_secret"),
+                        &AgoraId::from_bytes(array(case, "agora_id")),
+                        Epoch::new(case["epoch"].as_u64().expect("epoch is a number")),
+                    );
+                    check(&construction.name, case, derived.expose());
+                }
+
+                "derive_witness_key" => {
+                    let derived = derive_witness_key(
                         &bytes(case, "agora_secret"),
                         &AgoraId::from_bytes(array(case, "agora_id")),
                         Epoch::new(case["epoch"].as_u64().expect("epoch is a number")),
@@ -269,6 +278,29 @@ fn every_vector_matches() {
                     check(&construction.name, case, produced.as_bytes());
                 }
 
+                // A rejection vector: it carries no output. The point must be refused
+                // wherever a witnessed subgroup point is required (§9.1's cofactor clause),
+                // so a second implementation that decodes points without the subgroup check
+                // fails here rather than silently accepting a torsion point.
+                "subgroup_check" => {
+                    let point = bytes(case, "point");
+                    let agora = AgoraId::from_bytes([0x99; 32]);
+                    assert!(
+                        commit(
+                            &point,
+                            &CredentialKey::new([0x01; 32]),
+                            &RootOpening::new([0x02; 32]),
+                            &agora,
+                        )
+                        .is_none(),
+                        "an off-subgroup root key formed a leaf"
+                    );
+                    assert!(
+                        signature::migration_cert_message(&agora, &point).is_none(),
+                        "an off-subgroup key produced a certificate message"
+                    );
+                }
+
                 other => panic!("no runner for construction `{other}`"),
             }
             checked += 1;
@@ -277,7 +309,7 @@ fn every_vector_matches() {
 
     // A harness that silently ran nothing would pass forever. Cheap insurance, and the same
     // failure the secret scan was once found to have.
-    assert!(checked >= 23, "only {checked} vectors ran");
+    assert!(checked >= 25, "only {checked} vectors ran");
 }
 
 /// A `Commitment` is not a `Nullifier` even where the bytes coincide, and the vectors must not

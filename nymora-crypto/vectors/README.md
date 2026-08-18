@@ -14,6 +14,12 @@ Each construction lists cases with named inputs and an expected `output`. All by
 lowercase hex; empty strings mean zero-length inputs, which are meaningful — several
 constructions accept them, and framing is what keeps them distinguishable from an absent field.
 
+A case with **no `output`** is a *rejection* vector: its named input must be **refused**, and
+the runner asserts the refusal rather than matching bytes. `subgroup_check` is one — it pins the
+canonical encoding of an off-subgroup curve point that every construction admitting a point must
+reject (the §9.1 cofactor clause), so an implementation that skips the subgroup check fails here
+rather than silently accepting a torsion point.
+
 `tests/conformance.rs` runs them against this implementation and will fail if any value moves.
 
 ## `status`

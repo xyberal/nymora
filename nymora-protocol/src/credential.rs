@@ -561,6 +561,7 @@ fn take_framed<'a>(rest: &mut &'a [u8]) -> Result<&'a [u8], ProtocolError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::load_acting_material;
     use nymora_ports::SoftwareKeyStore;
     use std::collections::HashMap;
     use std::format;
@@ -818,6 +819,54 @@ mod tests {
             swept,
             vec![3, 4, 5, 6],
             "the sweep must cover the whole gap"
+        );
+    }
+
+    /// The proof layer cannot even assemble material for a swept epoch. Once the rollover
+    /// deletes an ended epoch's key and certificate (§9.1's forward-secrecy deletion),
+    /// `load_acting_material` refuses that epoch with `Unavailable` — the destroyed key is
+    /// unreachable, not merely unusable. Pins the security property `proving.rs` documents,
+    /// which the sweep tests above only prove transitively (the slot is gone) — here it is
+    /// the observable answer the proof layer gets.
+    #[test]
+    fn a_swept_epoch_cannot_be_loaded_for_proving() {
+        let mut store = TestStore::default();
+        created(&mut store, AGORA_A); // the durable credential material
+        rolled(&mut store, AGORA_A, 3, 0xe1); // certify epoch 3
+
+        // Epoch 3 assembles while it is current.
+        let mut pk = [0u8; 64];
+        let mut record = [0u8; 256];
+        assert!(
+            load_acting_material(AGORA_A, &store, Epoch::new(3), &mut pk, &mut record).is_ok(),
+            "the acting epoch must load"
+        );
+
+        // Wake at epoch 7 without acting: the sweep destroys epoch 3's key and certificate.
+        rolled(&mut store, AGORA_A, 7, 0xe2);
+
+        let mut pk_swept = [0u8; 64];
+        let mut record_swept = [0u8; 256];
+        assert_eq!(
+            load_acting_material(
+                AGORA_A,
+                &store,
+                Epoch::new(3),
+                &mut pk_swept,
+                &mut record_swept
+            )
+            .err(),
+            Some(ProtocolError::Unavailable),
+            "a swept epoch must be unreachable to the proof layer, not loadable"
+        );
+
+        // The current epoch still assembles — the refusal is specific to the destroyed one.
+        let mut pk_now = [0u8; 64];
+        let mut record_now = [0u8; 256];
+        assert!(
+            load_acting_material(AGORA_A, &store, Epoch::new(7), &mut pk_now, &mut record_now)
+                .is_ok(),
+            "the current epoch must still load"
         );
     }
 

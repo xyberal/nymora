@@ -213,6 +213,20 @@
    ]
   },
   {
+   "name": "derive_witness_key",
+   "spec": "§5.2",
+   "status": "settled",
+   "cases": [
+    {
+     "name": "epoch-7",
+     "agora_secret": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+     "agora_id": "7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e",
+     "epoch": 7,
+     "output": "f6956dfc6c99d7f97b9b1f6f5d45c4967329dd40f1804ad214ec8e17fbe96272"
+    }
+   ]
+  },
+  {
    "name": "tag",
    "spec": "§6.4",
    "status": "settled",
@@ -269,6 +283,18 @@
      "message_field": "0700000000000000000000000000000000000000000000000000000000000000",
      "public_key": "3a16d1e4fe70984f8ebefd515d9e2a07ed23efbee9a76d1c10f14c98118c1f49",
      "output": "ce55f7c6684978bef34a8e4b84d36457b615b753e0d0a7bcde03232a6df24cba1450f6f310bed36badf73ff545c52669032a4842728b3168cf2c67819142750e"
+    }
+   ]
+  },
+  {
+   "name": "subgroup_check",
+   "spec": "§9.1",
+   "status": "settled",
+   "cases": [
+    {
+     "name": "order-2-torsion-point-refused",
+     "point": "00000000fffffffffe5bfeff02a4bd5305d8a10908d83933487d9d2953a7ed73",
+     "note": "the canonical encoding of the order-2 point (0, -1): on the curve, outside the prime-order subgroup. Every construction that admits a witnessed point must refuse it (the §9.1 cofactor clause). This case pins a refusal and carries no output."
     }
    ]
   }
