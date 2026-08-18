@@ -245,7 +245,12 @@ pub fn roll_epoch(
         }
     }
 
-    let secret = signature::mint_signing_secret(epoch_secret.take());
+    // The epoch signing key lives across the signing, sweep, and store below, so — unlike
+    // the durable secrets, which land in a zeroizing newtype the moment they are minted —
+    // it would otherwise sit in a bare stack array until the frame is reused. Hold it in
+    // `Zeroizing` so a memory image taken after a rollover does not recover `sk_epoch`
+    // (threat-model §15). Deref gives the `&[u8; 32]` / `&[u8]` the callees want.
+    let secret = Zeroizing::new(signature::mint_signing_secret(epoch_secret.take()));
     let epoch_public_key = signature::public_key(&secret).expect("minted keys are canonical");
 
     // Sign before destroying anything: a refused prompt or a short buffer must leave the
@@ -254,7 +259,7 @@ pub fn roll_epoch(
 
     discard_expired(agora, storage, current)?;
 
-    storage.store(agora, Slot::EpochKey(current), &secret)?;
+    storage.store(agora, Slot::EpochKey(current), &secret[..])?;
     if let Err(error) = storage.store(agora, Slot::EpochCert(current), &record[..record_len]) {
         let _ = storage.delete(agora, Slot::EpochKey(current));
         return Err(error);
