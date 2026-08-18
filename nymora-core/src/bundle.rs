@@ -176,10 +176,13 @@ fn take_framed<'a>(rest: &mut &'a [u8]) -> Result<&'a [u8], ProtocolError> {
     // saying so here keeps the cast below total on 32-bit hosts.
     let len = usize::try_from(len).map_err(|_| ProtocolError::Malformed)?;
 
-    let body = rest
-        .get(LENGTH_PREFIX..LENGTH_PREFIX + len)
-        .ok_or(ProtocolError::Malformed)?;
-    *rest = &rest[LENGTH_PREFIX + len..];
+    // Split past the prefix first, then take `len` from the remainder: computing
+    // `LENGTH_PREFIX + len` would overflow — and panic in an overflow-checked build — for a
+    // hostile length near `usize::MAX`, where this returns `Malformed` instead. `body`'s
+    // success bounds `len` at or below the remainder, so the reslice cannot panic.
+    let after_prefix = rest.get(LENGTH_PREFIX..).ok_or(ProtocolError::Malformed)?;
+    let body = after_prefix.get(..len).ok_or(ProtocolError::Malformed)?;
+    *rest = &after_prefix[len..];
     Ok(body)
 }
 
@@ -286,6 +289,13 @@ mod tests {
         let mut bytes = encoded(&sample(b"hello", b"proof"));
         bytes[1] = 0xff;
         assert_eq!(Bundle::decode(&bytes), Err(ProtocolError::Malformed));
+
+        // A length prefix at the pointer-width maximum is a clean refusal, not a panic —
+        // adding it to the prefix offset would overflow. The single-byte case above keeps
+        // `len` small and never reaches that addition, so this pins the overflow path.
+        let mut maxed = encoded(&sample(b"hello", b"proof"));
+        maxed[1..1 + super::LENGTH_PREFIX].fill(0xff);
+        assert_eq!(Bundle::decode(&maxed), Err(ProtocolError::Malformed));
     }
 
     /// An unknown version is rejected rather than parsed on a best-effort basis.

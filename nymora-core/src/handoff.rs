@@ -193,10 +193,13 @@ fn take_framed<'a>(rest: &mut &'a [u8]) -> Result<&'a [u8], ProtocolError> {
         .try_into()
         .map_err(|_| ProtocolError::Malformed)?;
     let len = usize::try_from(u64::from_le_bytes(prefix)).map_err(|_| ProtocolError::Malformed)?;
-    let body = rest
-        .get(LENGTH_PREFIX..LENGTH_PREFIX + len)
-        .ok_or(ProtocolError::Malformed)?;
-    *rest = &rest[LENGTH_PREFIX + len..];
+    // Split past the prefix first, then take `len` from the remainder: computing
+    // `LENGTH_PREFIX + len` would overflow — and panic in an overflow-checked build — for a
+    // hostile length near `usize::MAX`, where this returns `Malformed` instead. `body`'s
+    // success bounds `len` at or below the remainder, so the reslice cannot panic.
+    let after_prefix = rest.get(LENGTH_PREFIX..).ok_or(ProtocolError::Malformed)?;
+    let body = after_prefix.get(..len).ok_or(ProtocolError::Malformed)?;
+    *rest = &after_prefix[len..];
     Ok(body)
 }
 
@@ -305,17 +308,21 @@ mod tests {
     #[test]
     fn an_overstated_length_is_rejected() {
         for framed_field in 0..2 {
-            let mut bytes = encoded(&sample(b"pk", b"cert"));
             let prefix_at = match framed_field {
                 0 => 1 + 32 + 32 + 32,
                 _ => 1 + 32 + 32 + 32 + 8 + 2,
             };
-            bytes[prefix_at] = 0xff;
-            assert_eq!(
-                MigrationHandoff::decode(&bytes),
-                Err(ProtocolError::Malformed),
-                "framed field {framed_field} accepted an overstated length"
-            );
+            // A moderately overstated length, then a pointer-width-maximum one: the latter
+            // would overflow `prefix + len`, so it must refuse cleanly rather than panic.
+            for width in [1, super::LENGTH_PREFIX] {
+                let mut bytes = encoded(&sample(b"pk", b"cert"));
+                bytes[prefix_at..prefix_at + width].fill(0xff);
+                assert_eq!(
+                    MigrationHandoff::decode(&bytes),
+                    Err(ProtocolError::Malformed),
+                    "framed field {framed_field} accepted an overstated length (width {width})"
+                );
+            }
         }
     }
 

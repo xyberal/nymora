@@ -551,10 +551,13 @@ fn take_framed<'a>(rest: &mut &'a [u8]) -> Result<&'a [u8], ProtocolError> {
         .try_into()
         .map_err(|_| ProtocolError::Malformed)?;
     let len = usize::try_from(u64::from_le_bytes(prefix)).map_err(|_| ProtocolError::Malformed)?;
-    let body = rest
-        .get(PREFIX..PREFIX + len)
-        .ok_or(ProtocolError::Malformed)?;
-    *rest = &rest[PREFIX + len..];
+    // Split past the prefix first, then take `len` from the remainder: computing
+    // `PREFIX + len` would overflow — and panic in an overflow-checked build — for a hostile
+    // length near `usize::MAX`, where this returns `Malformed` instead. `body`'s success
+    // bounds `len` at or below the remainder, so the reslice cannot panic.
+    let after_prefix = rest.get(PREFIX..).ok_or(ProtocolError::Malformed)?;
+    let body = after_prefix.get(..len).ok_or(ProtocolError::Malformed)?;
+    *rest = &after_prefix[len..];
     Ok(body)
 }
 
