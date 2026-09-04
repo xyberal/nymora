@@ -33,7 +33,9 @@ use ff::PrimeField;
 use group::GroupEncoding;
 use midnight_curves::{Fr as JubjubScalar, JubjubSubgroup};
 use nymora_accumulator::{AbsenceWitness as ByteAbsence, Witness as ByteWitness};
-use nymora_circuits::{statement, Action, ChainPublicInputs, MigrationPublicInputs, ProofSystem};
+use nymora_circuits::{
+    statement, Action, ChainPublicInputs, InboxPublicInputs, MigrationPublicInputs, ProofSystem,
+};
 use nymora_core::{field_domain, ProtocolError};
 use nymora_crypto::field as crossing;
 
@@ -41,6 +43,7 @@ use crate::{
     backend::{Backend, ProveError},
     chain::{ChainInstance, ChainWitness},
     exclusion::AbsenceWitness,
+    inbox::{InboxInstance, InboxWitness},
     migration::{MigrationInstance, MigrationWitness},
     tree::Path,
     F,
@@ -186,6 +189,24 @@ fn migration_witness<const DEPTH: usize>(
     })
 }
 
+fn inbox_instance(public: &InboxPublicInputs) -> Option<InboxInstance> {
+    Some(InboxInstance {
+        agora: bridge(crossing::from_id(public.agora.as_bytes())),
+        leaf: decode(public.leaf.as_bytes())?,
+        inbox_key: bridge(crossing::from_id(public.inbox_public_key.as_bytes())),
+        action: F::from(public.action.tag()),
+    })
+}
+
+fn inbox_witness(witness: &statement::InboxWitness<'_>) -> Option<InboxWitness> {
+    Some(InboxWitness {
+        root_public_key: decode_point(witness.root_public_key)?,
+        root_opening: decode(witness.root_opening.expose())?,
+        credential_key: decode(witness.credential_key.expose())?,
+        certificate: decode_signature(witness.inbox_cert_signature)?,
+    })
+}
+
 /// A conversion failure means the witness cannot satisfy any statement — the caller's
 /// own material, refused as such. A backend failure past the satisfiability check is
 /// operational.
@@ -199,6 +220,7 @@ fn prove_error(error: ProveError) -> ProtocolError {
 impl<const DEPTH: usize> ProofSystem<DEPTH> for Backend<DEPTH> {
     type Proof = Vec<u8>;
     type MigrationProof = Vec<u8>;
+    type InboxProof = Vec<u8>;
 
     fn prove(
         &self,
@@ -237,5 +259,23 @@ impl<const DEPTH: usize> ProofSystem<DEPTH> for Backend<DEPTH> {
             return false;
         };
         self.verify_migration_statement(proof, &instance)
+    }
+
+    fn prove_inbox(
+        &self,
+        witness: &statement::InboxWitness<'_>,
+        public: &InboxPublicInputs,
+    ) -> Result<Self::InboxProof, ProtocolError> {
+        let instance = inbox_instance(public).ok_or(ProtocolError::Malformed)?;
+        let witness = inbox_witness(witness).ok_or(ProtocolError::Malformed)?;
+        self.prove_inbox_statement(&witness, &instance)
+            .map_err(prove_error)
+    }
+
+    fn verify_inbox(&self, proof: &Self::InboxProof, public: &InboxPublicInputs) -> bool {
+        let Some(instance) = inbox_instance(public) else {
+            return false;
+        };
+        self.verify_inbox_statement(proof, &instance)
     }
 }

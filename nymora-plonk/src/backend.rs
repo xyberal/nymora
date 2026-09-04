@@ -20,6 +20,7 @@ use rand_chacha::ChaCha20Rng;
 
 use crate::{
     chain::{ChainInstance, ChainRelation, ChainWitness},
+    inbox::{InboxInstance, InboxRelation, InboxWitness},
     migration::{MigrationInstance, MigrationRelation, MigrationWitness},
 };
 
@@ -41,12 +42,16 @@ pub struct Backend<const DEPTH: usize> {
     chain_pk: MidnightPK<ChainRelation<DEPTH>>,
     migration_vk: MidnightVK,
     migration_pk: MidnightPK<MigrationRelation<DEPTH>>,
+    inbox_vk: MidnightVK,
+    inbox_pk: MidnightPK<InboxRelation>,
 }
 
 impl<const DEPTH: usize> Backend<DEPTH> {
-    /// The rows (log2) the larger of the two statements needs.
+    /// The rows (log2) the largest of the three statements needs.
     pub fn required_k() -> u32 {
-        optimal_k(&ChainRelation::<DEPTH>).max(optimal_k(&MigrationRelation::<DEPTH>))
+        optimal_k(&ChainRelation::<DEPTH>)
+            .max(optimal_k(&MigrationRelation::<DEPTH>))
+            .max(optimal_k(&InboxRelation))
     }
 
     /// A backend over a deterministic, **insecure** local string. Test and CI use
@@ -85,12 +90,16 @@ impl<const DEPTH: usize> Backend<DEPTH> {
         let chain_pk = setup_pk(&ChainRelation::<DEPTH>, &chain_vk);
         let migration_vk = setup_vk(&srs, &MigrationRelation::<DEPTH>);
         let migration_pk = setup_pk(&MigrationRelation::<DEPTH>, &migration_vk);
+        let inbox_vk = setup_vk(&srs, &InboxRelation);
+        let inbox_pk = setup_pk(&InboxRelation, &inbox_vk);
         Backend {
             srs,
             chain_vk,
             chain_pk,
             migration_vk,
             migration_pk,
+            inbox_vk,
+            inbox_pk,
         }
     }
 
@@ -163,6 +172,45 @@ impl<const DEPTH: usize> Backend<DEPTH> {
         verify::<MigrationRelation<DEPTH>, blake2b_simd::State>(
             &self.srs.verifier_params(),
             &self.migration_vk,
+            instance,
+            None,
+            proof,
+        )
+        .is_ok()
+    }
+
+    /// Proves the inbox statement for exactly these public inputs.
+    ///
+    /// # Errors
+    ///
+    /// [`ProveError::Unsatisfiable`] when the witness does not satisfy the
+    /// statement; [`ProveError::Backend`] otherwise.
+    pub fn prove_inbox_statement(
+        &self,
+        witness: &InboxWitness,
+        instance: &InboxInstance,
+    ) -> Result<Vec<u8>, ProveError> {
+        if !crate::satisfies_inbox(witness, instance) {
+            return Err(ProveError::Unsatisfiable);
+        }
+        let mut rng = ChaCha20Rng::from_entropy();
+        prove::<InboxRelation, blake2b_simd::State>(
+            &self.srs,
+            &self.inbox_pk,
+            &InboxRelation,
+            instance,
+            witness.clone(),
+            &mut rng,
+        )
+        .map_err(ProveError::Backend)
+    }
+
+    /// Whether `proof` establishes the inbox statement for exactly these public
+    /// inputs.
+    pub fn verify_inbox_statement(&self, proof: &[u8], instance: &InboxInstance) -> bool {
+        verify::<InboxRelation, blake2b_simd::State>(
+            &self.srs.verifier_params(),
+            &self.inbox_vk,
             instance,
             None,
             proof,

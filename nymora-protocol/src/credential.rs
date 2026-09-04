@@ -39,14 +39,16 @@
 //! an orphaned root authorizes nothing, because its commitment never left the device.
 
 use nymora_core::{
-    AgoraId, Commitment, EpochCertPayload, MigrationCertPayload, MigrationHandoff, Nullifier,
-    ProtocolError, SecretBytes, TagKey,
+    AgoraId, Commitment, EpochCertPayload, InboxAction, InboxCertPayload, InboxPublicKey,
+    InboxSecretKey, MigrationCertPayload, MigrationHandoff, Nullifier, ProtocolError, SecretBytes,
+    TagKey,
 };
 use nymora_core::{CredentialKey, Epoch, RootOpening};
 use nymora_ports::{KeyStore, RootMaterialOut, RootMaterialWritten, SecureStorage, Slot};
 use zeroize::Zeroizing;
 
-use nymora_crypto::{commit, field, nullifier, signature};
+use nymora_circuits::InboxWitness;
+use nymora_crypto::{commit, field, inbox, nullifier, signature};
 
 /// Fresh secret bytes from the host's CSPRNG, consumed exactly once.
 ///
@@ -73,12 +75,41 @@ impl FreshEntropy {
     }
 }
 
+/// The three fresh secrets a credential is created from (§5.1's freshness rule, per
+/// agora, per value): the counting key, the commitment opening, and the inbox key.
+#[derive(Debug)]
+pub struct CredentialEntropy {
+    /// Becomes `sk_cred` (§9.1), minted canonical.
+    pub credential_key: FreshEntropy,
+    /// Becomes `r_root` (§9.1), minted canonical.
+    pub root_opening: FreshEntropy,
+    /// Becomes `sk_inbox` (§11, proposal 0036), minted by the X25519 clamp.
+    pub inbox_key: FreshEntropy,
+}
+
+/// The caller's buffers [`authorize_migration`] writes into: the old root public key,
+/// the two certificates, and the encoded handoff.
+#[derive(Debug)]
+pub struct MigrationBuffers<'a> {
+    /// Receives `pk_root` — sized as [`KeyStore`] requires.
+    pub root_public_key: &'a mut [u8],
+    /// Receives the migration certificate.
+    pub signature: &'a mut [u8],
+    /// Receives the retirement certificate (proposal 0036).
+    pub retire_signature: &'a mut [u8],
+    /// Receives the encoded [`MigrationHandoff`].
+    pub handoff: &'a mut [u8],
+}
+
 /// What [`create`] produced.
 #[derive(Debug)]
 pub struct Created {
     /// The credential's leaf, `Commit(pk_root, sk_cred, r_root, agora_id)` (§9.1) — what
     /// `credentials/init` submits for admission (§5.3).
     pub commitment: Commitment,
+    /// The credential's inbox key (§11, proposal 0036) — registered with the leaf at
+    /// `credentials/init`, the one surface it ever appears on.
+    pub inbox: InboxPublicKey,
     /// How much of each caller buffer the root creation used, including whether the backend
     /// produced a hardware binding.
     pub root: RootMaterialWritten,
@@ -93,6 +124,9 @@ pub struct Migrated {
     /// The migration nullifier `Hash(sk_cred, leaf_old, agora_id)` consuming the old leaf —
     /// submitted alongside the migration proof, spent in the migration-spend set (§9.1).
     pub spend: Nullifier,
+    /// The successor's fresh inbox key (§9.3, proposal 0036), registered with the
+    /// successor leaf at `credentials/migrate`.
+    pub inbox: InboxPublicKey,
 }
 
 /// The most epochs one rollover will sweep.
@@ -121,11 +155,15 @@ pub fn create(
     agora: AgoraId,
     key_store: &dyn KeyStore,
     storage: &mut dyn SecureStorage,
-    credential_key: FreshEntropy,
-    root_opening: FreshEntropy,
+    entropy: CredentialEntropy,
     public_key: &mut [u8],
     binding: &mut [u8],
 ) -> Result<Created, ProtocolError> {
+    let CredentialEntropy {
+        credential_key,
+        root_opening,
+        inbox_key,
+    } = entropy;
     let root = key_store.create_root(
         agora,
         RootMaterialOut {
@@ -145,19 +183,28 @@ pub fn create(
     // A key store that produced bytes naming no subgroup point has violated its own
     // contract; the caller's material is unusable.
     let commitment = commit(pk_root, &sk_cred, &r_root, &agora).ok_or(ProtocolError::Malformed)?;
+    // The inbox key (proposal 0036): fresh per credential like every other value, minted
+    // canonical by the X25519 clamp.
+    let sk_inbox = InboxSecretKey::new(inbox::mint_inbox_secret(inbox_key.take()));
+    let inbox = inbox::inbox_public_key(&sk_inbox);
 
-    store_credential_material(storage, agora, &sk_cred, &r_root, pk_root)?;
+    store_credential_material(storage, agora, &sk_cred, &r_root, pk_root, &sk_inbox)?;
 
-    Ok(Created { commitment, root })
+    Ok(Created {
+        commitment,
+        inbox,
+        root,
+    })
 }
 
-/// Stores the three durable slots, unwinding the ones already written on failure.
+/// Stores the four durable slots, unwinding the ones already written on failure.
 fn store_credential_material(
     storage: &mut dyn SecureStorage,
     agora: AgoraId,
     sk_cred: &CredentialKey,
     r_root: &RootOpening,
     pk_root: &[u8],
+    sk_inbox: &InboxSecretKey,
 ) -> Result<(), ProtocolError> {
     storage.store(agora, Slot::CredentialKey, sk_cred.expose())?;
     if let Err(error) = storage.store(agora, Slot::RootOpening, r_root.expose()) {
@@ -169,7 +216,113 @@ fn store_credential_material(
         let _ = storage.delete(agora, Slot::CredentialKey);
         return Err(error);
     }
+    if let Err(error) = storage.store(agora, Slot::InboxKey, sk_inbox.expose()) {
+        let _ = storage.delete(agora, Slot::RootPublicKey);
+        let _ = storage.delete(agora, Slot::RootOpening);
+        let _ = storage.delete(agora, Slot::CredentialKey);
+        return Err(error);
+    }
     Ok(())
+}
+
+/// Loads the credential's inbox secret (§11, proposal 0036) — what opens this
+/// credential's boundary ciphertext.
+///
+/// # Errors
+///
+/// [`ProtocolError::Unavailable`] where no inbox key is stored — no credential here, or
+/// one whose migration already destroyed it (§9.3).
+pub fn load_inbox_secret(
+    agora: AgoraId,
+    storage: &dyn SecureStorage,
+) -> Result<InboxSecretKey, ProtocolError> {
+    Ok(InboxSecretKey::new(*load_secret32(
+        agora,
+        storage,
+        Slot::InboxKey,
+    )?))
+}
+
+/// The credential's registered inbox key, derived from the stored secret.
+///
+/// # Errors
+///
+/// As [`load_inbox_secret`].
+pub fn inbox_public_key(
+    agora: AgoraId,
+    storage: &dyn SecureStorage,
+) -> Result<InboxPublicKey, ProtocolError> {
+    Ok(inbox::inbox_public_key(&load_inbox_secret(agora, storage)?))
+}
+
+/// The stored material an inbox proof takes as witness (§9.3, §11; proposal 0036):
+/// `sk_cred`, `r_root`, and `pk_root` — what opens the leaf.
+#[derive(Debug)]
+pub struct InboxMaterial<'a> {
+    credential_key: CredentialKey,
+    root_opening: RootOpening,
+    root_public_key: &'a [u8],
+}
+
+/// Loads the material an inbox proof opens the leaf with.
+///
+/// # Errors
+///
+/// [`ProtocolError::Unavailable`] where any slot is absent; [`ProtocolError::Malformed`]
+/// for a too-small key buffer.
+pub fn load_inbox_material<'a>(
+    agora: AgoraId,
+    storage: &dyn SecureStorage,
+    root_public_key: &'a mut [u8],
+) -> Result<InboxMaterial<'a>, ProtocolError> {
+    let credential_key = CredentialKey::new(*load_secret32(agora, storage, Slot::CredentialKey)?);
+    let root_opening = RootOpening::new(*load_secret32(agora, storage, Slot::RootOpening)?);
+    let pk_len = storage
+        .load(agora, Slot::RootPublicKey, root_public_key)?
+        .ok_or(ProtocolError::Unavailable)?;
+    Ok(InboxMaterial {
+        credential_key,
+        root_opening,
+        root_public_key: &root_public_key[..pk_len],
+    })
+}
+
+impl InboxMaterial<'_> {
+    /// Assembles the inbox witness from this material and a root signature over the
+    /// instruction (from [`KeyStore::sign_inbox_cert`]).
+    #[must_use]
+    pub fn witness<'w>(&'w self, inbox_cert_signature: &'w [u8]) -> InboxWitness<'w> {
+        InboxWitness {
+            root_public_key: self.root_public_key,
+            root_opening: &self.root_opening,
+            credential_key: &self.credential_key,
+            inbox_cert_signature,
+        }
+    }
+}
+
+/// Signs an inbox instruction with the credential's root authority (§9.3, §11; proposal
+/// 0036) — a renewal naming the key to (re)register, or a retirement naming the key to
+/// stop; the migration path signs its retirement inside [`authorize_migration`].
+///
+/// # Errors
+///
+/// Whatever the key store reports.
+pub fn sign_inbox_cert(
+    agora: AgoraId,
+    key_store: &dyn KeyStore,
+    action: InboxAction,
+    inbox_public_key: &InboxPublicKey,
+    signature: &mut [u8],
+) -> Result<usize, ProtocolError> {
+    key_store.sign_inbox_cert(
+        &InboxCertPayload {
+            agora,
+            action,
+            inbox_public_key: inbox_public_key.as_bytes(),
+        },
+        signature,
+    )
 }
 
 /// Destroys every epoch key and certificate for epochs that have ended.
@@ -401,59 +554,103 @@ pub fn create_successor_root(
 /// Authorizes a planned migration on the old device, producing the encoded handoff (§9.3).
 ///
 /// Signs the canonical [`MigrationCertPayload`] over the successor's public key and writes
-/// the [`MigrationHandoff`] — `sk_cred`, `r_root`, `pk_root`, the certificate — into
-/// `out`, returning its length. That is everything the migration *proof* needs about the
-/// predecessor, because the successor is the prover: the statement it proves opens the old
-/// leaf, and the leaf itself is derived from these values rather than carried. The handoff
-/// carries the durable secret; the transport rules in `nymora-core`'s handoff module are
-/// the caller's obligations from this point.
+/// the [`MigrationHandoff`] — `sk_cred`, `r_root`, `pk_root`, the certificate, and the
+/// retirement certificate — into `out`, returning its length. That is everything the
+/// migration *proof* needs about the predecessor, because the successor is the prover: the
+/// statement it proves opens the old leaf, and the leaf itself is derived from these
+/// values rather than carried. The handoff carries the durable secret; the transport rules
+/// in `nymora-core`'s handoff module are the caller's obligations from this point.
 ///
-/// Nothing is deleted here. The old leaf stays valid until the successor's migration is
-/// verified and the spend enters the exclusion roots at the boundary (§9.3); when the old
-/// device retires its local material is the host's decision, made after the successor is
-/// confirmed, not a step this function can safely take for it.
+/// **Migration is atomic with key destruction on this device** (§9.3, proposal 0036). Once
+/// the certificates are signed, the inbox secret, every epoch key and certificate, and
+/// the epoch cursor are deleted here, in this call: an old device that keeps decrypting
+/// bulletins after handing off is the exposure this closes, and Path 1 is the member's
+/// own cooperative act on a device they hold. The durable slots stay — the old leaf is
+/// valid until the spend lands at the boundary, and `sk_cred` is what the handoff carries
+/// — so a migration the operator refuses is recoverable: re-certify an epoch key from the
+/// root, and renew a fresh inbox key with [`sign_inbox_cert`].
+///
+/// The retirement certificate is signed here, over this credential's inbox key, and rides
+/// in the handoff for the successor to submit — or never — at a time of its choosing
+/// (§9.3: retirement links predecessor and successor within the migration batch, so it is
+/// opt-in and deliberately not part of the migration's own epoch).
 ///
 /// # Errors
 ///
 /// [`ProtocolError::Unavailable`] if no credential is stored for `agora` (or its stored
 /// material is corrupt); [`ProtocolError::Malformed`] for short caller buffers; port errors
-/// unchanged.
+/// unchanged. Nothing is deleted unless every signature succeeded and the handoff encoded.
 pub fn authorize_migration(
     agora: AgoraId,
     key_store: &dyn KeyStore,
-    storage: &dyn SecureStorage,
+    storage: &mut dyn SecureStorage,
     successor_public_key: &[u8],
-    root_public_key: &mut [u8],
-    signature: &mut [u8],
-    out: &mut [u8],
+    buffers: MigrationBuffers<'_>,
 ) -> Result<usize, ProtocolError> {
+    let MigrationBuffers {
+        root_public_key,
+        signature,
+        retire_signature,
+        handoff: out,
+    } = buffers;
     let sk_cred = CredentialKey::new(*load_secret32(agora, storage, Slot::CredentialKey)?);
     let r_root = RootOpening::new(*load_secret32(agora, storage, Slot::RootOpening)?);
     let pk_len = storage
         .load(agora, Slot::RootPublicKey, root_public_key)?
         .ok_or(ProtocolError::Unavailable)?;
+    let inbox = inbox_public_key(agora, storage)?;
 
     let payload = MigrationCertPayload {
         agora,
         successor_public_key,
     };
     let sig_len = key_store.sign_migration(&payload, signature)?;
+    let retire_len = key_store.sign_inbox_cert(
+        &InboxCertPayload {
+            agora,
+            action: InboxAction::Retire,
+            inbox_public_key: inbox.as_bytes(),
+        },
+        retire_signature,
+    )?;
 
-    MigrationHandoff {
+    let written = MigrationHandoff {
         agora,
         credential_key: sk_cred,
         root_opening: r_root,
         root_public_key: &root_public_key[..pk_len],
         migration_cert: &signature[..sig_len],
+        retire_cert: &retire_signature[..retire_len],
     }
-    .encode(out)
+    .encode(out)?;
+
+    destroy_acting_material(agora, storage)?;
+    Ok(written)
+}
+
+/// Deletes the inbox secret, every epoch key and certificate up to and including the
+/// cursor's epoch, and the cursor — what planned migration leaves behind on the old
+/// device (§9.3, proposal 0036).
+fn destroy_acting_material(
+    agora: AgoraId,
+    storage: &mut dyn SecureStorage,
+) -> Result<(), ProtocolError> {
+    storage.delete(agora, Slot::InboxKey)?;
+    if let Some(cursor) = load_cursor(agora, storage)? {
+        discard_expired(agora, storage, cursor)?;
+        storage.delete(agora, Slot::EpochKey(cursor))?;
+        storage.delete(agora, Slot::EpochCert(cursor))?;
+        storage.delete(agora, Slot::EpochCursor)?;
+    }
+    Ok(())
 }
 
 /// Completes a planned migration on the successor device (§9.3).
 ///
-/// Takes the decoded handoff, the public key from [`create_successor_root`], and a fresh
+/// Takes the decoded handoff, the public key from [`create_successor_root`], a fresh
 /// opening — `r_root` is regenerated because nothing requires it to survive, while
-/// `sk_cred` carries because every count depends on it. Verifies the handoff names this
+/// `sk_cred` carries because every count depends on it — and fresh inbox entropy: the
+/// successor's delivery address is its own (§9.3, proposal 0036). Verifies the handoff names this
 /// agora, assembles the successor leaf, derives the spend, and stores the durable slots
 /// with the same unwind-on-failure contract as [`create`].
 ///
@@ -472,6 +669,7 @@ pub fn complete_migration(
     handoff: &MigrationHandoff<'_>,
     root_public_key: &[u8],
     root_opening: FreshEntropy,
+    inbox_key: FreshEntropy,
 ) -> Result<Migrated, ProtocolError> {
     if handoff.agora != agora {
         return Err(ProtocolError::Malformed);
@@ -492,6 +690,8 @@ pub fn complete_migration(
     )
     .ok_or(ProtocolError::Malformed)?;
     let spend = nullifier::migration(&handoff.credential_key, &consumed_leaf, &agora);
+    let sk_inbox = InboxSecretKey::new(inbox::mint_inbox_secret(inbox_key.take()));
+    let inbox = inbox::inbox_public_key(&sk_inbox);
 
     store_credential_material(
         storage,
@@ -499,9 +699,14 @@ pub fn complete_migration(
         &handoff.credential_key,
         &r_root,
         root_public_key,
+        &sk_inbox,
     )?;
 
-    Ok(Migrated { commitment, spend })
+    Ok(Migrated {
+        commitment,
+        spend,
+        inbox,
+    })
 }
 
 /// Loads the member's epoch cursor, or `None` before the first certification.
@@ -640,8 +845,11 @@ mod tests {
             agora,
             &key_store(),
             store,
-            entropy(0x44),
-            entropy(0x22),
+            CredentialEntropy {
+                credential_key: entropy(0x44),
+                root_opening: entropy(0x22),
+                inbox_key: entropy(0x1b),
+            },
             &mut pk,
             &mut binding,
         )
@@ -649,13 +857,23 @@ mod tests {
     }
 
     #[test]
-    fn create_stores_the_three_durable_slots_and_returns_the_leaf() {
+    fn create_stores_the_four_durable_slots_and_returns_the_leaf() {
         let mut store = TestStore::default();
         let made = created(&mut store, AGORA_A);
 
-        for slot in [Slot::CredentialKey, Slot::RootOpening, Slot::RootPublicKey] {
+        for slot in [
+            Slot::CredentialKey,
+            Slot::RootOpening,
+            Slot::RootPublicKey,
+            Slot::InboxKey,
+        ] {
             assert!(store.holds(AGORA_A, slot), "{slot:?} was not stored");
         }
+        // The returned inbox key is the public half of the stored secret (0036).
+        assert_eq!(
+            inbox_public_key(AGORA_A, &store).expect("inbox stored"),
+            made.inbox
+        );
 
         // The commitment is exactly the leaf over the stored material.
         let mut pk = [0u8; 32];
@@ -690,8 +908,11 @@ mod tests {
             AGORA_A,
             &key_store(),
             &mut store,
-            entropy(0xff),
-            entropy(0xff),
+            CredentialEntropy {
+                credential_key: entropy(0xff),
+                root_opening: entropy(0xff),
+                inbox_key: entropy(0xff),
+            },
             &mut pk,
             &mut binding,
         )
@@ -713,7 +934,7 @@ mod tests {
     /// The atomicity contract: a failure part-way must leave no slot behind.
     #[test]
     fn create_unwinds_every_slot_a_failure_leaves_behind() {
-        for allowed in 0..3 {
+        for allowed in 0..4 {
             let mut store = TestStore {
                 stores_before_failure: Some(allowed),
                 ..TestStore::default()
@@ -724,13 +945,21 @@ mod tests {
                 AGORA_A,
                 &key_store(),
                 &mut store,
-                entropy(0x44),
-                entropy(0x22),
+                CredentialEntropy {
+                    credential_key: entropy(0x44),
+                    root_opening: entropy(0x22),
+                    inbox_key: entropy(0x1b),
+                },
                 &mut pk,
                 &mut binding,
             );
             assert_eq!(result.unwrap_err(), ProtocolError::Unavailable);
-            for slot in [Slot::CredentialKey, Slot::RootOpening, Slot::RootPublicKey] {
+            for slot in [
+                Slot::CredentialKey,
+                Slot::RootOpening,
+                Slot::RootPublicKey,
+                Slot::InboxKey,
+            ] {
                 assert!(
                     !store.holds(AGORA_A, slot),
                     "{slot:?} survived a failure after {allowed} stores"
@@ -986,20 +1215,42 @@ mod tests {
                 .expect("root creation succeeds");
         let successor_pk = &successor_pk[..written.public_key];
 
-        // Old device authorizes and emits the handoff.
+        // Old device authorizes and emits the handoff — and destroys its own acting
+        // material in the same call (proposal 0036).
+        let old_inbox = inbox_public_key(AGORA_A, &old_device).expect("inbox stored");
+        rolled(&mut old_device, AGORA_A, 3, 0xe3);
         let mut old_pk = [0u8; 64];
         let mut signature = [0u8; 64];
-        let mut handoff_bytes = [0u8; 256];
+        let mut retire = [0u8; 64];
+        let mut handoff_bytes = [0u8; 512];
         let len = authorize_migration(
             AGORA_A,
             &key_store(),
-            &old_device,
+            &mut old_device,
             successor_pk,
-            &mut old_pk,
-            &mut signature,
-            &mut handoff_bytes,
+            MigrationBuffers {
+                root_public_key: &mut old_pk,
+                signature: &mut signature,
+                retire_signature: &mut retire,
+                handoff: &mut handoff_bytes,
+            },
         )
         .expect("authorization succeeds");
+        for slot in [
+            Slot::InboxKey,
+            Slot::EpochKey(Epoch::new(3)),
+            Slot::EpochCert(Epoch::new(3)),
+            Slot::EpochCursor,
+        ] {
+            assert!(
+                !old_device.holds(AGORA_A, slot),
+                "{slot:?} survived authorization"
+            );
+        }
+        assert!(
+            old_device.holds(AGORA_A, Slot::CredentialKey),
+            "the durable slots stay"
+        );
 
         // Successor decodes and completes. The consumed leaf is no longer carried — it is
         // derived from the handoff's witness material, and must equal the leaf created.
@@ -1013,6 +1264,17 @@ mod tests {
             ),
             Some(old.commitment)
         );
+        // The retirement certificate rides along: the old root's signature over the
+        // retire instruction for the old inbox key, for the successor to submit — or
+        // never (§9.3).
+        let retire_message =
+            signature::inbox_cert_message(&AGORA_A, InboxAction::Retire, old_inbox.as_bytes())
+                .expect("32 bytes");
+        assert!(signature::verify(
+            handoff.root_public_key,
+            &retire_message,
+            handoff.retire_cert
+        ));
 
         let mut new_device = TestStore::default();
         let migrated = complete_migration(
@@ -1021,8 +1283,17 @@ mod tests {
             &handoff,
             successor_pk,
             entropy(0x23),
+            entropy(0x1c),
         )
         .expect("migration completes");
+        assert_eq!(
+            inbox_public_key(AGORA_A, &new_device).expect("successor inbox stored"),
+            migrated.inbox
+        );
+        assert_ne!(
+            migrated.inbox, old_inbox,
+            "the successor's inbox is its own"
+        );
 
         // The spend is the per-leaf migration nullifier over the carried key.
         assert_eq!(
@@ -1061,6 +1332,7 @@ mod tests {
                 root_opening: RootOpening::new([opening; 32]),
                 root_public_key: &old_root,
                 migration_cert: b"cert",
+                retire_cert: b"",
             };
             let mut store = TestStore::default();
             complete_migration(
@@ -1069,6 +1341,7 @@ mod tests {
                 &handoff,
                 &successor_root,
                 entropy(0x23),
+                entropy(0x1c),
             )
             .expect("migration completes")
             .spend
@@ -1085,11 +1358,19 @@ mod tests {
             root_opening: RootOpening::new([0x22; 32]),
             root_public_key: &[0x11; 32],
             migration_cert: b"cert",
+            retire_cert: b"",
         };
         let mut store = TestStore::default();
         assert_eq!(
-            complete_migration(AGORA_A, &mut store, &handoff, &[0x66; 32], entropy(0x23))
-                .unwrap_err(),
+            complete_migration(
+                AGORA_A,
+                &mut store,
+                &handoff,
+                &[0x66; 32],
+                entropy(0x23),
+                entropy(0x1c)
+            )
+            .unwrap_err(),
             ProtocolError::Malformed
         );
         assert!(
@@ -1100,19 +1381,23 @@ mod tests {
 
     #[test]
     fn authorizing_without_a_credential_is_unavailable() {
-        let store = TestStore::default();
+        let mut store = TestStore::default();
         let mut pk = [0u8; 64];
         let mut signature = [0u8; 64];
-        let mut out = [0u8; 256];
+        let mut retire = [0u8; 64];
+        let mut out = [0u8; 512];
         assert_eq!(
             authorize_migration(
                 AGORA_A,
                 &key_store(),
-                &store,
+                &mut store,
                 &[0x66; 32],
-                &mut pk,
-                &mut signature,
-                &mut out,
+                MigrationBuffers {
+                    root_public_key: &mut pk,
+                    signature: &mut signature,
+                    retire_signature: &mut retire,
+                    handoff: &mut out,
+                },
             ),
             Err(ProtocolError::Unavailable)
         );
@@ -1178,15 +1463,19 @@ mod tests {
 
         let mut old_pk = [0u8; 64];
         let mut signature = [0u8; 64];
-        let mut handoff_bytes = [0u8; 256];
+        let mut retire = [0u8; 64];
+        let mut handoff_bytes = [0u8; 512];
         let len = authorize_migration(
             AGORA_A,
             &key_store(),
-            &store,
+            &mut store,
             successor_pk,
-            &mut old_pk,
-            &mut signature,
-            &mut handoff_bytes,
+            MigrationBuffers {
+                root_public_key: &mut old_pk,
+                signature: &mut signature,
+                retire_signature: &mut retire,
+                handoff: &mut handoff_bytes,
+            },
         )
         .unwrap();
         let handoff = MigrationHandoff::decode(&handoff_bytes[..len]).unwrap();
@@ -1198,6 +1487,7 @@ mod tests {
             &handoff,
             successor_pk,
             entropy(0x23),
+            entropy(0x1c),
         )
         .unwrap();
 

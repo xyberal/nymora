@@ -14,6 +14,7 @@ use nymora_plonk::backend::Backend;
 use nymora_plonk::chain::{ChainInstance, ChainWitness};
 use nymora_plonk::domains::action_tag;
 use nymora_plonk::exclusion::GapSet;
+use nymora_plonk::inbox::{InboxInstance, InboxWitness};
 use nymora_plonk::migration::{MigrationInstance, MigrationWitness};
 use nymora_plonk::primitives::{
     coords, poseidon, public_key, scalar_as_field, scalar_bytes, sign, Signature,
@@ -98,7 +99,8 @@ fn world_with(mutate: impl FnOnce(&mut GapSet, &mut GapSet, F)) -> World {
         root_opening,
         root_public_key,
         class_path: class_tree.witness(position).expect("appended"),
-        revocation_absence: revocations.absence_witness::<DEPTH>(leaf),
+        revocation_absence: revocations
+            .absence_witness::<DEPTH>(poseidon(&[domains::tag(domains::REVOKE), leaf])),
         spend_absence: spends.absence_witness::<DEPTH>(spend),
     };
     let instance_base = ChainInstance {
@@ -250,7 +252,7 @@ fn one_action_does_not_verify_as_another() {
 #[test]
 fn a_revoked_leaf_cannot_prove() {
     let world = world_with(|revocations, _, leaf| {
-        revocations.insert(leaf);
+        revocations.insert(poseidon(&[domains::tag(domains::REVOKE), leaf]));
     });
     let instance = world.action(action_tag::AUTHORSHIP, F::from(1));
     assert_unprovable(&world.witness, &instance);
@@ -436,7 +438,9 @@ fn migration_proves_and_a_laundered_successor_cannot() {
         migration_certificate,
         successor_public_key,
         successor_opening,
-        revocation_absence: world.revocations.absence_witness::<DEPTH>(world.leaf),
+        revocation_absence: world
+            .revocations
+            .absence_witness::<DEPTH>(poseidon(&[domains::tag(domains::REVOKE), world.leaf])),
     };
     let instance = MigrationInstance {
         agora: world.instance_base.agora,
@@ -483,7 +487,7 @@ fn migration_proves_and_a_laundered_successor_cannot() {
 #[test]
 fn a_revoked_credential_cannot_migrate() {
     let world = world_with(|revocations, _, leaf| {
-        revocations.insert(leaf);
+        revocations.insert(poseidon(&[domains::tag(domains::REVOKE), leaf]));
     });
     let mut rng = ChaCha20Rng::seed_from_u64(12);
     let successor_key = midnight_curves::Fr::random(&mut rng);
@@ -504,7 +508,9 @@ fn a_revoked_credential_cannot_migrate() {
         migration_certificate: sign(&world.root_key, payload),
         successor_public_key,
         successor_opening,
-        revocation_absence: world.revocations.absence_witness::<DEPTH>(world.leaf),
+        revocation_absence: world
+            .revocations
+            .absence_witness::<DEPTH>(poseidon(&[domains::tag(domains::REVOKE), world.leaf])),
     };
     let instance = MigrationInstance {
         agora: world.instance_base.agora,
@@ -541,4 +547,93 @@ fn a_forged_certificate_signature_cannot_prove() {
     };
     let instance = world.action(action_tag::AUTHORSHIP, F::from(1));
     assert_unprovable(&world.witness, &instance);
+}
+
+/// The revocation set holds `Poseidon(REVOKE, leaf)`, not the leaf (proposal 0036):
+/// a raw leaf in the set revokes nothing.
+#[test]
+fn a_raw_leaf_in_the_revocation_set_revokes_nothing() {
+    let world = world_with(|revocations, _, leaf| {
+        revocations.insert(leaf);
+    });
+    let instance = world.action(action_tag::AUTHORSHIP, F::from(1));
+    let proof = backend()
+        .prove_chain(&world.witness, &instance)
+        .expect("the leaf itself is not an entry");
+    assert!(backend().verify_chain(&proof, &instance));
+}
+
+/// The inbox statement (proposal 0036): the committed root key instructs, and every
+/// rebinding — the other action, another key, another leaf, a forged signature — fails.
+#[test]
+fn an_inbox_certificate_proves_and_binds_every_input() {
+    let world = world();
+    let inbox_key = F::from(0x1b0);
+    let action = F::from(domains::inbox_action::RETIRE);
+    let payload = poseidon(&[
+        domains::tag(domains::INBOX_CERT),
+        world.instance_base.agora,
+        action,
+        inbox_key,
+    ]);
+    let witness = InboxWitness {
+        root_public_key: world.witness.root_public_key,
+        root_opening: world.witness.root_opening,
+        credential_key: world.credential_key,
+        certificate: sign(&world.root_key, payload),
+    };
+    let instance = InboxInstance {
+        agora: world.instance_base.agora,
+        leaf: world.leaf,
+        inbox_key,
+        action,
+    };
+    let proof = backend()
+        .prove_inbox_statement(&witness, &instance)
+        .expect("a satisfied instruction must prove");
+    assert!(backend().verify_inbox_statement(&proof, &instance));
+
+    let as_renew = InboxInstance {
+        action: F::from(domains::inbox_action::RENEW),
+        ..instance
+    };
+    assert!(backend()
+        .prove_inbox_statement(&witness, &as_renew)
+        .is_err());
+    assert!(!backend().verify_inbox_statement(&proof, &as_renew));
+
+    let other_key = InboxInstance {
+        inbox_key: F::from(0x1b1),
+        ..instance
+    };
+    assert!(!backend().verify_inbox_statement(&proof, &other_key));
+
+    let other_leaf = InboxInstance {
+        leaf: F::from(0x77),
+        ..instance
+    };
+    assert!(backend()
+        .prove_inbox_statement(&witness, &other_leaf)
+        .is_err());
+    assert!(!backend().verify_inbox_statement(&proof, &other_leaf));
+
+    let out_of_range = InboxInstance {
+        action: F::from(2),
+        ..instance
+    };
+    assert!(backend()
+        .prove_inbox_statement(&witness, &out_of_range)
+        .is_err());
+
+    let forged = InboxWitness {
+        certificate: Signature {
+            s: witness.certificate.s + midnight_curves::Fr::from(1u64),
+            ..witness.certificate
+        },
+        ..witness.clone()
+    };
+    match backend().prove_inbox_statement(&forged, &instance) {
+        Err(_) => {}
+        Ok(proof) => assert!(!backend().verify_inbox_statement(&proof, &instance)),
+    }
 }

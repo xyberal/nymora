@@ -39,7 +39,7 @@
 use ff::PrimeField;
 use group::{Group, GroupEncoding};
 use jubjub::{Fr as JubjubScalar, SubgroupPoint};
-use nymora_core::{field_domain, AgoraId, Epoch};
+use nymora_core::{field_domain, AgoraId, Epoch, InboxAction};
 
 use crate::field::{self, F};
 use crate::poseidon;
@@ -206,9 +206,41 @@ pub fn migration_cert_message(agora: &AgoraId, successor_public_key: &[u8]) -> O
     ]))
 }
 
+/// The inbox certificate's canonical signed message (§9.3, §11; proposal 0036):
+/// `Poseidon(INBOX_CERT, agora, action, inbox_pk)`, the inbox key entering by the
+/// identifier rule (§6.5) — it is an X25519 point, not a field element, so it crosses as
+/// 32 opaque bytes.
+///
+/// Returns `None` for an inbox key of the wrong width.
+#[must_use]
+pub fn inbox_cert_message(
+    agora: &AgoraId,
+    action: InboxAction,
+    inbox_public_key: &[u8],
+) -> Option<F> {
+    let key: [u8; 32] = inbox_public_key.try_into().ok()?;
+    Some(poseidon::hash(&[
+        F::from(field_domain::INBOX_CERT),
+        field::from_id(agora.as_bytes()),
+        F::from(action.tag()),
+        field::from_id(&key),
+    ]))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inbox_cert_messages_separate_by_action_and_key() {
+        let agora = AgoraId::from_bytes([0x0a; 32]);
+        let retire = inbox_cert_message(&agora, InboxAction::Retire, &[0x11; 32]).unwrap();
+        let renew = inbox_cert_message(&agora, InboxAction::Renew, &[0x11; 32]).unwrap();
+        let other = inbox_cert_message(&agora, InboxAction::Retire, &[0x12; 32]).unwrap();
+        assert_ne!(retire, renew);
+        assert_ne!(retire, other);
+        assert!(inbox_cert_message(&agora, InboxAction::Retire, &[0x11; 31]).is_none());
+    }
 
     fn secret(byte: u8) -> [u8; SEED_LEN] {
         mint_signing_secret([byte; 32])

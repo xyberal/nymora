@@ -17,6 +17,7 @@ use crate::{
     chain::{ChainInstance, ChainWitness},
     domains,
     exclusion::verifies_absent,
+    inbox::{InboxInstance, InboxWitness},
     migration::{MigrationInstance, MigrationWitness},
     primitives::{challenge, coords, poseidon, public_key},
     F,
@@ -83,8 +84,13 @@ pub fn satisfies_chain<const DEPTH: usize>(
         return false;
     }
 
-    // The currency clauses.
-    if !verifies_absent(leaf, &witness.revocation_absence, &instance.revocation_root) {
+    // The currency clauses; the revocation entry recomputed from the leaf (0036).
+    let revocation_entry = poseidon(&[domains::tag(domains::REVOKE), leaf]);
+    if !verifies_absent(
+        revocation_entry,
+        &witness.revocation_absence,
+        &instance.revocation_root,
+    ) {
         return false;
     }
     let spend = poseidon(&[
@@ -144,8 +150,9 @@ pub fn satisfies_migration<const DEPTH: usize>(
         return false;
     }
 
+    let revocation_entry = poseidon(&[domains::tag(domains::REVOKE), old_leaf]);
     if !verifies_absent(
-        old_leaf,
+        revocation_entry,
         &witness.revocation_absence,
         &instance.revocation_root,
     ) {
@@ -191,4 +198,40 @@ pub fn satisfies_migration<const DEPTH: usize>(
         instance.agora,
     ]);
     successor_leaf == instance.successor_commitment
+}
+
+/// Whether the inbox statement (§9.3, §11; proposal 0036) holds for this witness against
+/// these inputs.
+pub fn satisfies_inbox(witness: &InboxWitness, instance: &InboxInstance) -> bool {
+    let (pk_x, pk_y) = coords(&witness.root_public_key);
+    let leaf = poseidon(&[
+        domains::tag(domains::LEAF),
+        pk_x,
+        pk_y,
+        witness.credential_key,
+        witness.root_opening,
+        instance.agora,
+    ]);
+    if leaf != instance.leaf {
+        return false;
+    }
+    if instance.action != F::from(domains::inbox_action::RETIRE)
+        && instance.action != F::from(domains::inbox_action::RENEW)
+    {
+        return false;
+    }
+    let payload = poseidon(&[
+        domains::tag(domains::INBOX_CERT),
+        instance.agora,
+        instance.action,
+        instance.inbox_key,
+    ]);
+    let e = reduce(challenge(
+        &witness.certificate.r,
+        &witness.root_public_key,
+        payload,
+    ));
+    let lhs = public_key(&witness.certificate.s);
+    let rhs = witness.certificate.r + witness.root_public_key * e;
+    lhs == rhs
 }

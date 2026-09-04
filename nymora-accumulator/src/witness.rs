@@ -123,6 +123,29 @@ impl<const DEPTH: usize> Witness<DEPTH> {
         Some(Self { index, siblings })
     }
 
+    /// Builds a witness from the levels below the tree's occupied height, filling the
+    /// rest with each level's empty-subtree value (proposal 0036): the member's
+    /// reconstruction of the path the operator delivered truncated.
+    ///
+    /// Returns `None` if `index` does not name a leaf at this depth or the prefix is
+    /// longer than the depth.
+    #[must_use]
+    pub fn from_prefix(index: u64, prefix: &[Node]) -> Option<Self> {
+        if prefix.len() > DEPTH {
+            return None;
+        }
+        let mut siblings = [Node::from_bytes([0u8; DIGEST_LEN]); DEPTH];
+        siblings[..prefix.len()].copy_from_slice(prefix);
+        let mut empty = Node::from_bytes([0u8; DIGEST_LEN]);
+        for (level, slot) in siblings.iter_mut().enumerate() {
+            if level >= prefix.len() {
+                *slot = empty;
+            }
+            empty = hash_node(&empty, &empty);
+        }
+        Self::new(index, siblings)
+    }
+
     /// The leaf's position.
     #[must_use]
     pub const fn index(&self) -> u64 {
@@ -134,6 +157,17 @@ impl<const DEPTH: usize> Witness<DEPTH> {
     pub const fn siblings(&self) -> &[Node; DEPTH] {
         &self.siblings
     }
+}
+
+/// The empty-subtree value at `level`: `[0]` is the empty leaf (the field's zero), and
+/// each level above hashes the level below with itself (§5.2's fold).
+#[must_use]
+pub fn empty_node(level: usize) -> Node {
+    let mut node = Node::from_bytes([0u8; DIGEST_LEN]);
+    for _ in 0..level {
+        node = hash_node(&node, &node);
+    }
+    node
 }
 
 /// The fold itself, over field elements — shared by the inclusion check here and the

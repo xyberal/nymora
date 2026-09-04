@@ -30,6 +30,12 @@ bls12_381 = { version = "0.8", default-features = false }
 jubjub = { version = "0.10", default-features = false }
 ff = { version = "0.13", default-features = false }
 group = { version = "0.13", default-features = false }
+# The inbox key (§11, proposal 0036): X25519 agreement and ChaCha20-Poly1305 for the
+# per-member boundary ciphertexts. Both `no_std`; both the boring, well-analyzed choice.
+# Deliberately not Jubjub — the certificate curve signs, the inbox key agrees on
+# secrets, and §9.1 keeps key roles apart.
+x25519-dalek = { version = "2", default-features = false, features = ["static_secrets", "zeroize"] }
+chacha20poly1305 = { version = "0.10", default-features = false }
 
 [dev-dependencies]
 # Conformance vectors are JSON so a second implementation in another language can consume them.

@@ -108,8 +108,8 @@ local_reasons! {
     PolicyDenied,
     /// The material belongs to a different agora (§16.1).
     WrongAgora,
-    /// The presented witness-service key is not the current epoch's (§5.2, proposal 0025).
-    WitnessKeyStale,
+    /// The presented fetch key is not within the bulletin window (§11, proposal 0036).
+    FetchKeyStale,
     /// The agora has been dissolved (§12).
     Dissolved,
 }

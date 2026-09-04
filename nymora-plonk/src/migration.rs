@@ -172,11 +172,13 @@ impl<const DEPTH: usize> Relation for MigrationRelation<DEPTH> {
         let computed_root = gadgets::merkle_root(std_lib, layouter, &old_leaf, &old_class_path)?;
         std_lib.assert_equal(layouter, &computed_root, &class_root)?;
 
-        // A revoked credential cannot migrate out from under its revocation.
+        // A revoked credential cannot migrate out from under its revocation — the entry
+        // recomputed from the opened leaf (proposal 0036).
+        let revocation_entry = gadgets::revocation_entry(std_lib, layouter, &old_leaf)?;
         gadgets::assert_absent(
             std_lib,
             layouter,
-            &old_leaf,
+            &revocation_entry,
             witness.map(|w| w.revocation_absence),
             &revocation_root,
         )?;

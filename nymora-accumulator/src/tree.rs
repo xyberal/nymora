@@ -18,6 +18,11 @@
 //! tree is always an occupied prefix followed by empty subtrees. That is what makes this
 //! implementation short: the empty subtree hash at each level is the same value everywhere it
 //! occurs, so it is computed once per level rather than stored.
+//!
+//! This type is dense: it places whatever it is handed at the next position. The class
+//! accumulator's rule that leaves occupy even positions (§5.2, proposal 0036) is the
+//! operator's placement, made by appending the empty value after every leaf — the gap
+//! trees of [`crate::exclusion`] are built on this same type and stay dense.
 
 extern crate alloc;
 
@@ -86,6 +91,20 @@ impl<const DEPTH: usize> Tree<DEPTH> {
         Some(position)
     }
 
+    /// The number of levels at which a path's sibling can be anything but the level's
+    /// empty value: above it, the whole occupied prefix sits in the leftmost subtree and
+    /// every sibling is the empty subtree of its level. What the operator sends a member
+    /// as their path (§11, proposal 0036) — the levels below this — and the member fills
+    /// the rest from [`empty_node`](crate::empty_node).
+    #[must_use]
+    pub fn occupied_height(&self) -> usize {
+        let slots = self.leaves.len();
+        if slots <= 1 {
+            return 0;
+        }
+        (usize::BITS - (slots - 1).leading_zeros()) as usize
+    }
+
     /// The empty-subtree hash for each level, `[0]` being an empty leaf.
     ///
     /// Every empty position at a given level has the same hash, because every empty subtree is
@@ -97,6 +116,7 @@ impl<const DEPTH: usize> Tree<DEPTH> {
             let below = levels[level];
             levels.push(hash_node(&below, &below));
         }
+        debug_assert_eq!(levels[DEPTH], crate::witness::empty_node(DEPTH));
         levels
     }
 
@@ -168,7 +188,7 @@ impl<const DEPTH: usize> Tree<DEPTH> {
 #[cfg(test)]
 mod tests {
     use super::{Tree, EMPTY_LEAF};
-    use crate::witness::{hash_node, verifies};
+    use crate::witness::{hash_node, verifies, Witness};
     use nymora_core::{Commitment, DIGEST_LEN};
 
     fn value(byte: u8) -> Commitment {
@@ -195,6 +215,27 @@ mod tests {
                 "position {position} did not verify"
             );
         }
+    }
+
+    /// A path truncated at the occupied height, refilled with the empty values, is the
+    /// same path — the member-side reconstruction (proposal 0036).
+    #[test]
+    fn a_prefix_path_refills_to_the_full_one() {
+        let tree = filled(5);
+        let height = tree.occupied_height();
+        assert_eq!(height, 3, "five slots need three levels");
+        let full = tree.witness(4).expect("appended");
+        let rebuilt = Witness::<3>::from_prefix(4, &full.siblings()[..height]).expect("fits");
+        assert_eq!(rebuilt.siblings(), full.siblings());
+        assert!(verifies(&value(4), &rebuilt, &tree.root()));
+
+        let two = filled(2);
+        assert_eq!(two.occupied_height(), 1, "two slots need one level");
+        let full = two.witness(0).unwrap();
+        let rebuilt = Witness::<3>::from_prefix(0, &full.siblings()[..1]).unwrap();
+        assert_eq!(rebuilt.siblings(), full.siblings());
+        assert_eq!(filled(1).occupied_height(), 0);
+        assert_eq!(Tree::<3>::new().occupied_height(), 0);
     }
 
     /// A witness proves its own position and no other.

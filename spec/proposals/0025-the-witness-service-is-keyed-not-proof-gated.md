@@ -1,6 +1,6 @@
 # Proposal 0025 — The witness service is keyed, not proof-gated
 
-**Status:** **Applied** — the sections below are now normative in the specification
+**Status:** **Applied**, in part superseded — the roots half (no lookup endpoint for current roots) stands; the witness-service half is retired by proposal 0036, which delivers inclusion paths per member inside the boundary envelope
 **Affects:** §5.2, §11, §15
 **Supersedes:** nothing
 

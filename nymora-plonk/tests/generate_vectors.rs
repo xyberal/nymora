@@ -156,6 +156,23 @@ fn print_crypto_vectors() {
             ey,
         ]))
     );
+    // Proposal 0036: the revocation-set entry and the inbox-certificate message.
+    println!(
+        "revocation_key      = {}",
+        field_hex(primitives::poseidon(&[
+            domains::tag(domains::REVOKE),
+            F::from_repr([0x2b; 32]).unwrap(),
+        ]))
+    );
+    println!(
+        "inbox_cert_message  = {}",
+        field_hex(primitives::poseidon(&[
+            domains::tag(domains::INBOX_CERT),
+            agora,
+            F::from(domains::inbox_action::RENEW),
+            from_id(&[0x1b; 32]),
+        ]))
+    );
     let sig = primitives::sign(&scalar(mint_jub([0x42; 32])), F::from(7));
     println!(
         "sign/pk             = {}",

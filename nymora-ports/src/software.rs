@@ -40,8 +40,8 @@
 //! tags, so that no one mistakes one for the other.
 
 use crate::key_store::{
-    Capabilities, EpochCertPayload, KeyStore, MigrationCertPayload, RootMaterialOut,
-    RootMaterialWritten,
+    Capabilities, EpochCertPayload, InboxCertPayload, KeyStore, MigrationCertPayload,
+    RootMaterialOut, RootMaterialWritten,
 };
 use nymora_core::{AgoraId, ProtocolError, SecretBytes, DIGEST_LEN};
 use nymora_crypto::signature;
@@ -173,6 +173,20 @@ impl KeyStore for SoftwareKeyStore {
         let message = nymora_crypto::signature::migration_cert_message(
             &payload.agora,
             payload.successor_public_key,
+        );
+        let value = self.sign_message(payload.agora, message)?;
+        put(signature, &value)
+    }
+
+    fn sign_inbox_cert(
+        &self,
+        payload: &InboxCertPayload<'_>,
+        signature: &mut [u8],
+    ) -> Result<usize, ProtocolError> {
+        let message = nymora_crypto::signature::inbox_cert_message(
+            &payload.agora,
+            payload.action,
+            payload.inbox_public_key,
         );
         let value = self.sign_message(payload.agora, message)?;
         put(signature, &value)

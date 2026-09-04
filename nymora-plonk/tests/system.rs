@@ -24,7 +24,7 @@ use nymora_proofs::{
     prove_authorship, prove_migration, prove_vouch, verify_authorship, verify_migration,
     verify_vouch, EpochRoots,
 };
-use nymora_protocol::{create, load_acting_material, roll_epoch, FreshEntropy};
+use nymora_protocol::{create, load_acting_material, roll_epoch, CredentialEntropy, FreshEntropy};
 use std::collections::HashMap;
 
 const DEPTH: usize = PROTOCOL_DEPTH;
@@ -365,8 +365,11 @@ fn a_freshly_created_credential_proves_on_the_real_backend() {
         AGORA,
         &keys,
         &mut store,
-        FreshEntropy::new([0xff; 32]),
-        FreshEntropy::new([0xff; 32]),
+        CredentialEntropy {
+            credential_key: FreshEntropy::new([0xff; 32]),
+            root_opening: FreshEntropy::new([0xff; 32]),
+            inbox_key: FreshEntropy::new([0xff; 32]),
+        },
         &mut pk_buf,
         &mut binding,
     )

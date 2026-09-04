@@ -233,11 +233,14 @@ impl<const DEPTH: usize> Relation for ChainRelation<DEPTH> {
         let computed_class_root = gadgets::merkle_root(std_lib, layouter, &leaf, &class_path)?;
         std_lib.assert_equal(layouter, &computed_class_root, &class_root)?;
 
-        // Clauses 4 and 5 — the currency clauses: not revoked, not migrated away.
+        // Clauses 4 and 5 — the currency clauses: not revoked, not migrated away. The
+        // revocation set holds `Poseidon(REVOKE, leaf)` (proposal 0036), recomputed here
+        // from the opened leaf so a prover cannot substitute an entry.
+        let revocation_entry = gadgets::revocation_entry(std_lib, layouter, &leaf)?;
         gadgets::assert_absent(
             std_lib,
             layouter,
-            &leaf,
+            &revocation_entry,
             witness.clone().map(|w| w.revocation_absence),
             &revocation_root,
         )?;

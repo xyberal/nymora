@@ -54,7 +54,7 @@ use crate::secret::{CredentialKey, RootOpening};
 ///
 /// Decoders reject versions they do not know rather than guessing; see
 /// [`FORMAT_VERSION`](crate::FORMAT_VERSION) for the argument.
-pub const HANDOFF_VERSION: u8 = 1;
+pub const HANDOFF_VERSION: u8 = 2;
 
 /// Width of the length prefix on each variable-length field.
 const LENGTH_PREFIX: usize = core::mem::size_of::<u64>();
@@ -89,6 +89,16 @@ pub struct MigrationHandoff<'a> {
     ///
     /// [`MigrationCertPayload`]: crate::MigrationCertPayload
     pub migration_cert: &'a [u8],
+    /// The root signature over the canonical [`InboxCertPayload`] encoding with the
+    /// **retire** action over the old credential's inbox key (§9.3, proposal 0036).
+    ///
+    /// Signed by the old device at authorization time, held by the successor, and
+    /// submitted — or never — at a time of the successor's choosing: retirement is
+    /// opt-in, because submitting it links predecessor and successor within the period's
+    /// migration batch. Empty when the old device declined to sign one.
+    ///
+    /// [`InboxCertPayload`]: crate::InboxCertPayload
+    pub retire_cert: &'a [u8],
 }
 
 impl<'a> MigrationHandoff<'a> {
@@ -102,6 +112,8 @@ impl<'a> MigrationHandoff<'a> {
             + self.root_public_key.len()
             + LENGTH_PREFIX
             + self.migration_cert.len()
+            + LENGTH_PREFIX
+            + self.retire_cert.len()
     }
 
     /// Writes the canonical encoding into `out`, returning the number of bytes written.
@@ -131,6 +143,8 @@ impl<'a> MigrationHandoff<'a> {
         put(self.root_public_key);
         put(&(self.migration_cert.len() as u64).to_le_bytes());
         put(self.migration_cert);
+        put(&(self.retire_cert.len() as u64).to_le_bytes());
+        put(self.retire_cert);
 
         Ok(total)
     }
@@ -159,6 +173,7 @@ impl<'a> MigrationHandoff<'a> {
         let root_opening = RootOpening::new(take_digest(&mut rest)?);
         let root_public_key = take_framed(&mut rest)?;
         let migration_cert = take_framed(&mut rest)?;
+        let retire_cert = take_framed(&mut rest)?;
 
         if !rest.is_empty() {
             return Err(ProtocolError::Malformed);
@@ -170,6 +185,7 @@ impl<'a> MigrationHandoff<'a> {
             root_opening,
             root_public_key,
             migration_cert,
+            retire_cert,
         })
     }
 }
@@ -220,6 +236,7 @@ mod tests {
             root_opening: RootOpening::new([0x22; 32]),
             root_public_key: public_key,
             migration_cert: cert,
+            retire_cert: &[0xee; 2],
         }
     }
 
@@ -247,6 +264,8 @@ mod tests {
         expected.extend_from_slice(&[0xcc; 3]);
         expected.extend_from_slice(&4u64.to_le_bytes());
         expected.extend_from_slice(&[0xdd; 4]);
+        expected.extend_from_slice(&2u64.to_le_bytes());
+        expected.extend_from_slice(&[0xee; 2]);
         assert_eq!(encoded(&sample(&[0xcc; 3], &[0xdd; 4])), expected);
     }
 

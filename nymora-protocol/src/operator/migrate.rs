@@ -23,13 +23,15 @@
 
 use super::{Admission, AgoraState};
 use nymora_circuits::ProofSystem;
-use nymora_core::{Commitment, LocalReason, Nullifier, PolicyClass, ProtocolError, Rejection};
+use nymora_core::{
+    Commitment, InboxPublicKey, LocalReason, Nullifier, PolicyClass, ProtocolError, Rejection,
+};
 use nymora_proofs::verify_migration;
 
 impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
     /// Accepts a planned migration (§9.3's `credentials/migrate`): verifies the migration
     /// proof, checks the spend fresh, stages the spend for the boundary, and stages the
-    /// successor's leaf into the proven class.
+    /// successor's leaf — with its inbox key (proposal 0036) — into the proven class.
     ///
     /// The proof establishes — in zero knowledge, with `pk_root_old` never in the clear —
     /// that the old leaf is present and unrevoked in this class, that the old root
@@ -55,6 +57,7 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
         proof: &S::MigrationProof,
         spend: Nullifier,
         successor: Commitment,
+        inbox: InboxPublicKey,
     ) -> Result<Admission, ProtocolError> {
         self.live()?;
         // The set stores keys in the truncated ordering domain (proposal 0035), so the
@@ -86,6 +89,11 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
         // consuming the old leaf for nothing (proposal 0026).
         let admission = self.stage_admission(class, successor)?;
         self.staged.spends.push(spend);
+        // The successor's delivery address lands with its leaf (proposal 0036). The
+        // predecessor's is not touched: the spend does not name the consumed leaf, and
+        // that anonymity is migration's — retirement is the successor's later, opt-in act
+        // (§9.3), expiry the floor.
+        self.staged_inboxes.insert(successor, inbox);
         Ok(admission)
     }
 }

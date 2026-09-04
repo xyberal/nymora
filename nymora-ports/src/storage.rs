@@ -107,6 +107,15 @@ pub enum Slot {
     /// rather than shown to anyone. Deleted on the same sweep as the key it certifies.
     EpochCert(Epoch),
 
+    /// The inbox secret key, `sk_inbox` (§11, proposal 0036) — the X25519 secret the
+    /// credential's boundary ciphertexts are addressed to.
+    ///
+    /// Written once at creation and once more by a successor at migration; destroyed on
+    /// the old device by planned migration itself (§9.3), which is what closes the
+    /// listening-old-device exposure in the normal case. Wrapped like the epoch keys
+    /// where wrapping is in force (§9.2). It opens ciphertexts and does nothing else.
+    InboxKey,
+
     /// The member's own record of the last epoch it certified.
     ///
     /// Exists because this port deliberately refuses enumeration: epoch-end cleanup must know
@@ -254,6 +263,7 @@ mod tests {
             Slot::CredentialKey,
             Slot::RootOpening,
             Slot::RootPublicKey,
+            Slot::InboxKey,
             Slot::EpochCursor,
         ];
         for (i, a) in durable.iter().enumerate() {

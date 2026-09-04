@@ -30,8 +30,8 @@
 
 use nymora_accumulator::{AbsenceWitness, Witness};
 use nymora_core::{
-    AgoraId, CredentialKey, Epoch, EpochSecretKey, MessageHash, Nullifier, Root, RootOpening,
-    SessionContext, SessionPseudonym,
+    AgoraId, Commitment, CredentialKey, Epoch, EpochSecretKey, InboxAction, InboxPublicKey,
+    MessageHash, Nullifier, Root, RootOpening, SessionContext, SessionPseudonym,
 };
 
 /// The witness set of §9.1's membership chain — everything the prover holds privately.
@@ -61,7 +61,9 @@ pub struct ChainWitness<'a, const DEPTH: usize> {
     pub root_public_key: &'a [u8],
     /// The Merkle path showing the recomputed leaf under the class root (§5.2).
     pub leaf_witness: &'a Witness<DEPTH>,
-    /// Non-membership of the leaf in the revocation set (§11).
+    /// Non-membership of the leaf's revocation entry, `Poseidon(REVOKE, leaf)`, in the
+    /// revocation set (§11, proposal 0036). The entry is recomputed in-statement from
+    /// the opened leaf; the witness is the gap containing it.
     pub revocation_absence: &'a AbsenceWitness<DEPTH>,
     /// Non-membership of the derived migration nullifier in the spend set (§9.3).
     pub spend_absence: &'a AbsenceWitness<DEPTH>,
@@ -158,11 +160,46 @@ pub struct MigrationWitness<'a, const DEPTH: usize> {
     pub successor_public_key: &'a [u8],
     /// The successor's fresh `r_root`.
     pub successor_opening: &'a RootOpening,
-    /// Non-membership of the **old leaf** in the revocation set: a revoked credential
-    /// cannot migrate out from under its revocation (§11). In-statement because the leaf
-    /// is hidden; the spend set needs no clause here, since the spend nullifier is this
-    /// proof's public output and the verifier checks its own set directly.
+    /// Non-membership of the **old leaf's** revocation entry in the revocation set: a
+    /// revoked credential cannot migrate out from under its revocation (§11).
+    /// In-statement because the leaf is hidden; the spend set needs no clause here, since
+    /// the spend nullifier is this proof's public output and the verifier checks its own
+    /// set directly.
     pub revocation_absence: &'a AbsenceWitness<DEPTH>,
+}
+
+/// The witness set of the inbox statement (§9.3, §11; proposal 0036).
+///
+/// A third statement, deliberately small: it opens the leaf and verifies one root
+/// signature, with no path and no epoch key. Like migration it travels member-to-Skiora
+/// only, so §6.5's uniform-shape rule does not reach it. The leaf is a *public* input —
+/// the operator already holds it against the inbox key it names — so what the statement
+/// proves is that the leaf's committed root key issued this instruction, and nothing
+/// about which member is asking that the operator did not know.
+pub struct InboxWitness<'a> {
+    /// `pk_root` — the key committed in the leaf, kept a witness so no root key is ever
+    /// presented in the clear.
+    pub root_public_key: &'a [u8],
+    /// `r_root` — the commitment opening.
+    pub root_opening: &'a RootOpening,
+    /// `sk_cred` — committed in the leaf.
+    pub credential_key: &'a CredentialKey,
+    /// The root signature over the canonical inbox-certificate payload.
+    pub inbox_cert_signature: &'a [u8],
+}
+
+/// The public inputs of an inbox proof (§9.3, §11; proposal 0036).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InboxPublicInputs {
+    /// The agora the instruction applies within.
+    pub agora: AgoraId,
+    /// The leaf whose root key issued the instruction — public, because the operator
+    /// resolves the inbox key through it.
+    pub leaf: Commitment,
+    /// The inbox key the instruction names.
+    pub inbox_public_key: InboxPublicKey,
+    /// Retire or renew.
+    pub action: InboxAction,
 }
 
 /// The public inputs of a migration proof (§9.3).

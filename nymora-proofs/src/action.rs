@@ -4,11 +4,12 @@
 //! [`ProofSystem`].
 
 use nymora_circuits::{
-    Action, ChainPublicInputs, ChainWitness, MigrationPublicInputs, MigrationWitness, ProofSystem,
+    Action, ChainPublicInputs, ChainWitness, InboxPublicInputs, InboxWitness,
+    MigrationPublicInputs, MigrationWitness, ProofSystem,
 };
 use nymora_core::{
-    AgoraId, Commitment, Epoch, MessageHash, Nullifier, ProtocolError, Root, SessionContext,
-    SessionPseudonym,
+    AgoraId, Commitment, Epoch, InboxAction, InboxPublicKey, MessageHash, Nullifier, ProtocolError,
+    Root, SessionContext, SessionPseudonym,
 };
 use nymora_crypto::{commit, live_auth, nullifier};
 
@@ -364,6 +365,53 @@ pub fn verify_migration<S: ProofSystem<DEPTH>, const DEPTH: usize>(
             revocation_root,
             spend_nullifier,
             successor_commitment,
+        },
+    )
+}
+
+/// Proves an inbox instruction (§9.3, §11; proposal 0036): the leaf's committed root key
+/// signed `action` over `inbox_public_key`.
+///
+/// # Errors
+///
+/// [`ProtocolError::Malformed`] when the witness does not open `leaf` or the signature
+/// does not verify under the committed key.
+pub fn prove_inbox<S: ProofSystem<DEPTH>, const DEPTH: usize>(
+    system: &S,
+    witness: &InboxWitness<'_>,
+    agora: AgoraId,
+    leaf: Commitment,
+    inbox_public_key: InboxPublicKey,
+    action: InboxAction,
+) -> Result<S::InboxProof, ProtocolError> {
+    system.prove_inbox(
+        witness,
+        &InboxPublicInputs {
+            agora,
+            leaf,
+            inbox_public_key,
+            action,
+        },
+    )
+}
+
+/// Whether `proof` establishes that `leaf`'s root key issued `action` over
+/// `inbox_public_key` in `agora`.
+pub fn verify_inbox<S: ProofSystem<DEPTH>, const DEPTH: usize>(
+    system: &S,
+    proof: &S::InboxProof,
+    agora: AgoraId,
+    leaf: Commitment,
+    inbox_public_key: InboxPublicKey,
+    action: InboxAction,
+) -> bool {
+    system.verify_inbox(
+        proof,
+        &InboxPublicInputs {
+            agora,
+            leaf,
+            inbox_public_key,
+            action,
         },
     )
 }

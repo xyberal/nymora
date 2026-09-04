@@ -32,10 +32,11 @@ pub mod stub;
 pub mod system;
 
 pub use statement::{
-    Action, ChainPublicInputs, ChainWitness, MigrationPublicInputs, MigrationWitness,
+    Action, ChainPublicInputs, ChainWitness, InboxPublicInputs, InboxWitness,
+    MigrationPublicInputs, MigrationWitness,
 };
 #[cfg(feature = "stub-prover")]
-pub use stub::{MigrationStubProof, StubProof, StubProver};
+pub use stub::{InboxStubProof, MigrationStubProof, StubProof, StubProver};
 pub use system::ProofSystem;
 
 #[cfg(test)]

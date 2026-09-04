@@ -77,6 +77,13 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
                 return Err(ProtocolError::Malformed);
             }
         }
+        if let Decision::InboxHorizon { boundaries } = &decision {
+            if *boundaries < super::MIN_INBOX_HORIZON {
+                // Proposal 0036: a horizon inside a host's catch-up window would lapse
+                // registrations that are merely late, not gone.
+                return Err(ProtocolError::Malformed);
+            }
+        }
         let nonce = nonce_entropy.take();
         let subject = subject_id(self.agora, self.epoch, approving_class, &decision, &nonce);
         self.proposals.insert(
@@ -159,11 +166,14 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
     /// - **Policy**: the class's admission arithmetic and the governance quorum become the
     ///   proposed values, the class's policy version increments, and the change is logged
     ///   — *that* it changed, never who voted (§10.1).
-    /// - **Revocation**: the leaf enters the revocation set and **the epoch advances
-    ///   immediately** (§11) — the returned bulletin is inside [`Executed::Revocation`],
-    ///   and its delivery cut is the read-capability cut. Every open proposal and session
-    ///   expires with the boundary, this one having been consumed first.
+    /// - **Revocation**: the leaf's entry enters the revocation set and **the epoch
+    ///   advances immediately** (§11) — the returned envelope is inside
+    ///   [`Executed::Revocation`], and the revoked leaf's ciphertext is absent from it:
+    ///   the read-capability cut. Every open proposal and session expires with the
+    ///   boundary, this one having been consumed first.
     /// - **Dissolution**: the agora freezes, permanently (§12).
+    /// - **Inbox horizon**: the per-agora registration horizon becomes the proposed
+    ///   value (§11, proposal 0036).
     ///
     /// An unmet quorum refuses and leaves the proposal open — more approvals may arrive
     /// until the boundary. A met quorum consumes it.
@@ -218,14 +228,18 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
             }
             Decision::Revocation { leaf } => {
                 self.staged.revocations.push(leaf);
-                let bulletin = self.advance_epoch()?;
+                let envelope = self.advance_epoch()?;
                 Ok(Executed::Revocation {
-                    bulletin: alloc::boxed::Box::new(bulletin),
+                    envelope: alloc::boxed::Box::new(envelope),
                 })
             }
             Decision::Dissolution => {
                 self.dissolve();
                 Ok(Executed::Dissolved)
+            }
+            Decision::InboxHorizon { boundaries } => {
+                self.inbox_horizon = boundaries;
+                Ok(Executed::InboxHorizon { boundaries })
             }
         }
     }
@@ -242,11 +256,16 @@ pub enum Executed {
     },
     /// A revocation landed, advancing the epoch immediately (§11).
     Revocation {
-        /// The boundary bulletin — deliver to **remaining** members only; withholding it
-        /// from the revoked member is the read-capability cut of §11. Boxed for size
-        /// only: the bulletin dwarfs the other variants.
-        bulletin: alloc::boxed::Box<super::Bulletin>,
+        /// The boundary envelope — the revoked leaf's ciphertext is not in it, which is
+        /// the read-capability cut of §11 (proposal 0036). Boxed for size only: the
+        /// envelope dwarfs the other variants.
+        envelope: alloc::boxed::Box<super::Envelope>,
     },
     /// The agora is frozen (§12).
     Dissolved,
+    /// The inbox horizon changed (§11, proposal 0036).
+    InboxHorizon {
+        /// The boundaries a registration now lasts.
+        boundaries: u64,
+    },
 }

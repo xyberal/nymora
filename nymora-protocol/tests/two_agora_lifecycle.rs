@@ -30,7 +30,9 @@ use nymora_proofs::{
 };
 use nymora_protocol::live_auth::Contribution;
 use nymora_protocol::operator::{AgoraState, Executed, LogEntry};
-use nymora_protocol::{authorize_migration, complete_migration, create_successor_root, Decision};
+use nymora_protocol::{
+    authorize_migration, complete_migration, create_successor_root, Decision, MigrationBuffers,
+};
 
 use common::DEPTH;
 const GENESIS: Epoch = Epoch::new(1);
@@ -223,14 +225,34 @@ fn the_whole_lifecycle_runs_in_two_agoras_that_share_nothing() {
         .unwrap();
     alice.approve(&mut op_a, revoke);
     dana_a.approve(&mut op_a, revoke);
-    let bulletin = match op_a.execute(revoke).unwrap() {
-        Executed::Revocation { bulletin } => bulletin,
+    let envelope = match op_a.execute(revoke).unwrap() {
+        Executed::Revocation { envelope } => envelope,
         other => panic!("wrong effect: {other:?}"),
     };
-    alice.apply_bulletin(&bulletin);
-    dana_a.apply_bulletin(&bulletin);
-    // Bob's next proof refuses even with fresh witnesses (worst case: he saw the bulletin).
-    bob.apply_bulletin(&bulletin);
+    alice.apply_envelope(&envelope);
+    dana_a.apply_envelope(&envelope);
+    // The cut: nothing in the envelope is Bob's. Worst case — a leaky operator hands him
+    // the body — his next proof still refuses: his entry is in the set.
+    assert_eq!(
+        bob.receive(&envelope).unwrap_err(),
+        ProtocolError::Unavailable
+    );
+    let body = op_a.current_body().unwrap();
+    bob.revocations = nymora_accumulator::ExclusionSet::new();
+    for entry in &body.revoked {
+        bob.revocations.insert(*entry);
+    }
+    bob.roots = Some(nymora_proofs::EpochRoots {
+        class: body
+            .class_roots
+            .iter()
+            .find(|(class, _)| *class == tier_a)
+            .map(|(_, root)| *root)
+            .unwrap(),
+        revocation: body.revocation_root,
+        spend: body.spend_root,
+    });
+    bob.roll(op_a.current_epoch());
     bob.acting(&op_a, |witness, epoch, roots| {
         assert_eq!(
             prove_authorship(
@@ -248,7 +270,7 @@ fn the_whole_lifecycle_runs_in_two_agoras_that_share_nothing() {
     // B's revocation set is untouched: Dana still proves there, and B's current
     // revocation root is still the empty-set constant it started with.
     assert_eq!(
-        op_b.current_bulletin().unwrap().revocation_root,
+        op_b.current_body().unwrap().revocation_root,
         roots_b.revocation,
         "a revocation in one agora moved another's set"
     );
@@ -271,17 +293,22 @@ fn the_whole_lifecycle_runs_in_two_agoras_that_share_nothing() {
     let written = create_successor_root(agora_b, &successor_keys, &mut spk_buf, &mut binding)
         .expect("successor root");
     let successor_pk = &spk_buf[..written.public_key];
+    let mut old_device = dana_b.store.clone();
     let mut old_pk = [0u8; 64];
     let mut cert = [0u8; 128];
+    let mut retire = [0u8; 128];
     let mut handoff_bytes = [0u8; 512];
     let len = authorize_migration(
         agora_b,
         &dana_b.keys,
-        &dana_b.store,
+        &mut old_device,
         successor_pk,
-        &mut old_pk,
-        &mut cert,
-        &mut handoff_bytes,
+        MigrationBuffers {
+            root_public_key: &mut old_pk,
+            signature: &mut cert,
+            retire_signature: &mut retire,
+            handoff: &mut handoff_bytes,
+        },
     )
     .expect("authorizes");
     let handoff = nymora_core::MigrationHandoff::decode(&handoff_bytes[..len]).unwrap();
@@ -292,6 +319,7 @@ fn the_whole_lifecycle_runs_in_two_agoras_that_share_nothing() {
         &handoff,
         successor_pk,
         entropy(0x3d),
+        entropy(0x3e),
     )
     .expect("completes");
 
@@ -301,14 +329,10 @@ fn the_whole_lifecycle_runs_in_two_agoras_that_share_nothing() {
         .unwrap()
         .expect("stored");
     let successor_opening = RootOpening::new(opening);
-    let inclusion = op_b
-        .witness(
-            dana_b.witness_key.as_ref().unwrap(),
-            tier_b,
-            dana_b.position,
-        )
-        .unwrap();
-    let revocation_absence = dana_b.revocations.absence_witness(dana_b.leaf.as_bytes());
+    let inclusion = dana_b.path.expect("equipped");
+    let revocation_absence = dana_b
+        .revocations
+        .absence_witness(&nymora_crypto::revocation_key(&dana_b.leaf));
     let witness = MigrationWitness {
         old_root_public_key: handoff.root_public_key,
         old_root_opening: &handoff.root_opening,
@@ -330,15 +354,19 @@ fn the_whole_lifecycle_runs_in_two_agoras_that_share_nothing() {
     )
     .expect("proves");
     let admission = op_b
-        .migrate(tier_b, &mig_proof, spend, migrated.commitment)
+        .migrate(
+            tier_b,
+            &mig_proof,
+            spend,
+            migrated.commitment,
+            migrated.inbox,
+        )
         .expect("accepted");
-    let bulletin_b = op_b.advance_epoch().unwrap();
-    assert!(bulletin_b
-        .spent
-        .contains(&nymora_accumulator::exclusion::truncate_key(
-            spend.as_bytes()
-        )));
-    erin.apply_bulletin(&bulletin_b);
+    let envelope_b = op_b.advance_epoch().unwrap();
+    assert!(op_b.current_body().unwrap().spent.contains(
+        &nymora_accumulator::exclusion::truncate_key(spend.as_bytes())
+    ));
+    erin.apply_envelope(&envelope_b);
 
     // The successor acts in B; A's spend set never moved.
     let mut dana_b2 = Member {
@@ -348,16 +376,18 @@ fn the_whole_lifecycle_runs_in_two_agoras_that_share_nothing() {
         keys: successor_keys,
         store: new_store,
         leaf: migrated.commitment,
+        inbox: migrated.inbox,
         position: admission.position,
         revocations: nymora_accumulator::ExclusionSet::new(),
         spends: nymora_accumulator::ExclusionSet::new(),
         tag_keys: Vec::new(),
         roots: None,
-        witness_key: None,
+        path: None,
+        fetch_key: None,
         statement_key: Some(op_b.statement_key()),
         epoch: None,
     };
-    dana_b2.apply_bulletin(&bulletin_b);
+    dana_b2.apply_envelope(&envelope_b);
     dana_b2.acting(&op_b, |witness, epoch, roots| {
         prove_authorship(
             &StubProver,
@@ -370,7 +400,7 @@ fn the_whole_lifecycle_runs_in_two_agoras_that_share_nothing() {
         .expect("the successor acts");
     });
     assert_eq!(
-        op_a.current_bulletin().unwrap().spend_root,
+        op_a.current_body().unwrap().spend_root,
         roots_a.spend,
         "a migration in one agora moved another's spend set"
     );
@@ -415,11 +445,11 @@ fn the_whole_lifecycle_runs_in_two_agoras_that_share_nothing() {
         )
         .unwrap();
     alice.approve(&mut op_a, lost);
-    let bulletin = match op_a.execute(lost).unwrap() {
-        Executed::Revocation { bulletin } => bulletin,
+    let envelope = match op_a.execute(lost).unwrap() {
+        Executed::Revocation { envelope } => envelope,
         other => panic!("wrong effect: {other:?}"),
     };
-    alice.apply_bulletin(&bulletin);
+    alice.apply_envelope(&envelope);
     let old_dana_leaf = dana_a.leaf;
 
     // Fresh hardware, fresh everything, the standard vouch flow — and no continuity: the
@@ -451,7 +481,7 @@ fn the_whole_lifecycle_runs_in_two_agoras_that_share_nothing() {
         other => panic!("wrong effect: {other:?}"),
     }
     assert_eq!(
-        op_b.current_bulletin().unwrap_err(),
+        op_b.current_envelope().unwrap_err(),
         ProtocolError::Rejected,
         "a dissolved agora still serves"
     );

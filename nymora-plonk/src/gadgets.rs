@@ -105,6 +105,28 @@ pub fn assert_absent<const DEPTH: usize>(
     std_lib.assert_equal(layouter, &computed, root)
 }
 
+/// The revocation-set entry of a leaf, `Poseidon(REVOKE, leaf)` (§11, proposal 0036).
+pub fn revocation_entry(
+    std_lib: &ZkStdLib,
+    layouter: &mut impl Layouter<F>,
+    leaf: &AssignedNative<F>,
+) -> Result<AssignedNative<F>, Error> {
+    let revoke_tag: AssignedNative<F> =
+        std_lib.assign_fixed(layouter, domains::tag(domains::REVOKE))?;
+    std_lib.poseidon(layouter, &[revoke_tag, leaf.clone()])
+}
+
+/// Constrains `action` to the two inbox actions: `(action)(action - 1) = 0`.
+pub fn assert_inbox_action(
+    std_lib: &ZkStdLib,
+    layouter: &mut impl Layouter<F>,
+    action: &AssignedNative<F>,
+) -> Result<(), Error> {
+    let shifted = std_lib.add_constant(layouter, action, -F::from(1))?;
+    let product = std_lib.mul(layouter, action, &shifted, None)?;
+    std_lib.assert_equal_to_fixed(layouter, &product, F::from(0))
+}
+
 /// The GAP domain tag as a fixed assigned element.
 fn gap_tag(
     std_lib: &ZkStdLib,

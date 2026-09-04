@@ -30,10 +30,15 @@ pub mod live_auth;
 pub mod operator;
 pub mod proving;
 
-pub use bulletin::{accept_bulletin, bulletin_equivocation, BulletinStatement, EmbeddedHead};
+pub use bulletin::{
+    accept_envelope, ciphertexts_digest, envelope_equivocation, open_own_ciphertext,
+    own_lookup_tag, BodyView, EmbeddedHead, EnvelopeStatement, OwnCiphertext,
+};
 pub use credential::{
-    authorize_migration, create_successor_root, discard_expired, load_epoch_record, roll_epoch,
-    store_tag_key, EpochRecord, FreshEntropy, MAX_EPOCH_GAP,
+    authorize_migration, create_successor_root, discard_expired, inbox_public_key,
+    load_epoch_record, load_inbox_material, load_inbox_secret, roll_epoch, sign_inbox_cert,
+    store_tag_key, CredentialEntropy, EpochRecord, FreshEntropy, InboxMaterial, MigrationBuffers,
+    MAX_EPOCH_GAP,
 };
 pub use credential::{complete_migration, create, Created, Migrated};
 pub use decision::{subject_id, Decision, SubjectId};

@@ -11,11 +11,11 @@
 //! outside this file needs to name these shapes.
 
 use nymora_core::{
-    AgoraId, CeremonyMode, Commitment, CredentialKey, Domain, Epoch, EpochSecretKey, MessageHash,
-    Nullifier, PublicParameters, RootOpening, SessionContext, TagKey,
+    AgoraId, CeremonyMode, Commitment, CredentialKey, Domain, Epoch, EpochSecretKey, InboxAction,
+    MessageHash, Nullifier, PublicParameters, RootOpening, SessionContext, TagKey,
 };
 use nymora_crypto::{
-    agora_id, commit, derive_tag_key, derive_witness_key, field, kdf, live_auth, nullifier,
+    agora_id, commit, derive_fetch_key, derive_tag_key, field, kdf, live_auth, nullifier,
     policy_class, signature, tag, ByteHasher,
 };
 use serde::Deserialize;
@@ -151,13 +151,34 @@ fn every_vector_matches() {
                     check(&construction.name, case, derived.expose());
                 }
 
-                "derive_witness_key" => {
-                    let derived = derive_witness_key(
+                "derive_fetch_key" => {
+                    let derived = derive_fetch_key(
                         &bytes(case, "agora_secret"),
                         &AgoraId::from_bytes(array(case, "agora_id")),
                         Epoch::new(case["epoch"].as_u64().expect("epoch is a number")),
                     );
                     check(&construction.name, case, derived.expose());
+                }
+
+                "revocation_key" => {
+                    let entry =
+                        nymora_crypto::revocation_key(&Commitment::from_bytes(array(case, "leaf")));
+                    check(&construction.name, case, &entry);
+                }
+
+                "inbox_cert_message" => {
+                    let action = match case["action"].as_str().expect("action is a string") {
+                        "retire" => InboxAction::Retire,
+                        "renew" => InboxAction::Renew,
+                        other => panic!("unknown inbox action `{other}`"),
+                    };
+                    let message = signature::inbox_cert_message(
+                        &AgoraId::from_bytes(array(case, "agora_id")),
+                        action,
+                        &bytes(case, "inbox_public_key"),
+                    )
+                    .expect("32-byte inbox key");
+                    check(&construction.name, case, &field::to_bytes(&message));
                 }
 
                 "tag" => {

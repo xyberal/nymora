@@ -32,22 +32,25 @@
 
 pub mod agora_id;
 pub mod commit;
+pub mod fetch_key;
 pub mod field;
 pub mod hash;
+pub mod inbox;
 pub mod kdf;
 pub mod live_auth;
 pub mod nullifier;
 pub mod policy_class;
 pub mod poseidon;
+pub mod revocation;
 pub mod signature;
 pub mod tag;
-pub mod witness_key;
 
 pub use commit::commit;
+pub use fetch_key::derive_fetch_key;
 pub use field::F;
 pub use hash::{ByteHasher, HashBackend, Hasher, Sha256Backend};
+pub use revocation::revocation_key;
 pub use tag::{derive_tag_key, resolve, tag};
-pub use witness_key::derive_witness_key;
 
 // `kdf::derive`, `agora_id::derive`, and `policy_class::derive` are deliberately not
 // re-exported here. Three functions named `derive` at the crate root would be ambiguous at a

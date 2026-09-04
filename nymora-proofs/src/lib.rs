@@ -32,12 +32,12 @@
 mod action;
 
 pub use action::{
-    prove_authorship, prove_live_auth, prove_migration, prove_policy_approval,
-    prove_verification_access, prove_vouch, verify_authorship, verify_live_auth, verify_migration,
-    verify_policy_approval, verify_verification_access, verify_vouch, EpochRoots,
+    prove_authorship, prove_inbox, prove_live_auth, prove_migration, prove_policy_approval,
+    prove_verification_access, prove_vouch, verify_authorship, verify_inbox, verify_live_auth,
+    verify_migration, verify_policy_approval, verify_verification_access, verify_vouch, EpochRoots,
 };
 
-pub use nymora_circuits::{Action, ChainWitness, MigrationWitness, ProofSystem};
+pub use nymora_circuits::{Action, ChainWitness, InboxWitness, MigrationWitness, ProofSystem};
 
 #[cfg(test)]
 extern crate std;

@@ -1,6 +1,6 @@
 # Proposal 0036 — The boundary broadcast is delivered per member
 
-**Status:** **Proposed** — the spec text it affects remains authoritative
+**Status:** **Applied** — the sections below are now normative in the specification
 **Affects:** §4.1, §5.2, §5.3, §6.5, §9.1, §9.2, §9.3, §11, §15, §16.4
 **Supersedes:** the witness-service half of [proposal 0025](0025-the-witness-service-is-keyed-not-proof-gated.md)
 (its roots half — no lookup endpoint for current roots — stands unchanged)

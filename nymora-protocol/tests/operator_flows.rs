@@ -12,7 +12,7 @@
 //! migration's acceptance path with the §9.3 window at both edges; a revoked credential
 //! refused migration by the statement's absence clause; a previously valid proof refused
 //! at the operator against fresher roots (0016); `redeem_access` refusing an unknown
-//! class; mid-life `current_bulletin()` re-serving the same statement rather than
+//! class; mid-life `current_envelope()` re-serving the same statement rather than
 //! re-signing it; the transparency log surviving audit and betraying tampering and forks;
 //! dissolution freezing everything while cached history still verifies; and exhaustion
 //! refusing at the door (§5.2).
@@ -25,21 +25,24 @@ use common::{admit, advance, entropy, found, Member, TestStore};
 use nymora_accumulator::ExclusionSet;
 use nymora_circuits::StubProver;
 use nymora_core::{
-    AgoraId, Epoch, MessageHash, PolicyClass, ProtocolError, RootOpening, TagKey, WitnessKey,
+    AgoraId, Epoch, InboxAction, InboxPublicKey, MessageHash, PolicyClass, ProtocolError,
+    RootOpening, TagKey,
 };
-use nymora_crypto::tag;
+use nymora_crypto::{revocation_key, tag};
 use nymora_ports::{SecureStorage, Slot, SoftwareKeyStore};
 use nymora_proofs::{
-    prove_authorship, prove_live_auth, prove_migration, prove_verification_access,
-    verify_authorship, verify_live_auth, MigrationWitness,
+    prove_authorship, prove_inbox, prove_live_auth, prove_migration, prove_verification_access,
+    verify_authorship, verify_live_auth, EpochRoots, MigrationWitness,
 };
 use nymora_protocol::live_auth::Contribution;
 use nymora_protocol::operator::{
     conforms, equivocation, verify_log, AgoraState, ClassPolicy, Executed, Founding, LogEntry,
+    MIN_INBOX_HORIZON,
 };
 use nymora_protocol::{
-    accept_bulletin, authorize_migration, bulletin_equivocation, complete_migration,
-    create_successor_root, load_acting_material, Decision,
+    accept_envelope, authorize_migration, complete_migration, create_successor_root,
+    envelope_equivocation, load_acting_material, load_inbox_material, open_own_ciphertext,
+    own_lookup_tag, sign_inbox_cert, Decision, MigrationBuffers,
 };
 use std::vec::Vec;
 
@@ -69,6 +72,7 @@ fn cut_migration(
     SoftwareKeyStore,
     TestStore,
     nymora_core::Commitment,
+    InboxPublicKey,
     nymora_core::Nullifier,
     nymora_circuits::MigrationStubProof<DEPTH>,
 ) {
@@ -80,19 +84,30 @@ fn cut_migration(
             .expect("successor root");
     let successor_pk = &successor_pk_buf[..written.public_key];
 
+    // Authorization destroys the old device's acting material (0036); `from` keeps a
+    // copy — the escaped-material case the server-side window is measured against.
+    let mut old_device = from.store.clone();
     let mut old_pk = [0u8; 64];
     let mut cert = [0u8; 128];
+    let mut retire = [0u8; 128];
     let mut handoff_bytes = [0u8; 512];
     let len = authorize_migration(
         AGORA,
         &from.keys,
-        &from.store,
+        &mut old_device,
         successor_pk,
-        &mut old_pk,
-        &mut cert,
-        &mut handoff_bytes,
+        MigrationBuffers {
+            root_public_key: &mut old_pk,
+            signature: &mut cert,
+            retire_signature: &mut retire,
+            handoff: &mut handoff_bytes,
+        },
     )
     .expect("authorization succeeds");
+    assert!(
+        !old_device.holds(AGORA, Slot::InboxKey),
+        "authorization left the inbox key"
+    );
     let handoff =
         nymora_core::MigrationHandoff::decode(&handoff_bytes[..len]).expect("handoff decodes");
 
@@ -103,6 +118,7 @@ fn cut_migration(
         &handoff,
         successor_pk,
         entropy(completion),
+        entropy(completion ^ 0x1b),
     )
     .expect("completion succeeds");
 
@@ -112,10 +128,10 @@ fn cut_migration(
         .unwrap()
         .expect("successor opening stored");
     let successor_opening = RootOpening::new(stored_opening);
-    let inclusion = op
-        .witness(from.witness_key.as_ref().unwrap(), TIER2, from.position)
-        .unwrap();
-    let revocation_absence = from.revocations.absence_witness(from.leaf.as_bytes());
+    let inclusion = from.path.expect("equipped");
+    let revocation_absence = from
+        .revocations
+        .absence_witness(&revocation_key(&from.leaf));
     let witness = MigrationWitness {
         old_root_public_key: handoff.root_public_key,
         old_root_opening: &handoff.root_opening,
@@ -137,62 +153,98 @@ fn cut_migration(
     )
     .expect("a current credential migrates");
     assert_eq!(spend, migrated.spend);
-    (successor_keys, new_store, migrated.commitment, spend, proof)
+    let _ = op;
+    (
+        successor_keys,
+        new_store,
+        migrated.commitment,
+        migrated.inbox,
+        spend,
+        proof,
+    )
 }
 
-// ---- §5.2: the witness service (proposal 0025) ----
+// ---- §11: the envelope is delivered per member (proposal 0036) ----
 
-/// The witness service answers only to the epoch's key: a guessed key refuses over
-/// occupied and empty positions indistinguishably (no occupancy probe), and the boundary
-/// rotates the key, so yesterday's dies exactly where a revoked member's service must.
+/// The envelope carries one ciphertext per live credential and nothing for anyone else:
+/// a pending candidate finds no ciphertext, a stranger's inbox secret opens nothing, the
+/// boundary that lands a leaf adds its ciphertext, and the fetch key in the body is the
+/// operator's own for the epoch.
 #[test]
-fn the_witness_service_is_keyed_to_the_epoch() {
+fn the_envelope_delivers_to_members_only() {
     let mut alice = member(0x11);
     let mut op = founded(&mut alice, false);
 
-    // An outsider's guess refuses — and an occupied position (0, the founder) is
-    // indistinguishable from an empty one (7).
-    let guess = WitnessKey::new([0x99; 32]);
+    let genesis = op.current_envelope().unwrap();
     assert_eq!(
-        op.witness(&guess, TIER2, 0).unwrap_err(),
-        ProtocolError::Rejected
+        genesis.ciphertexts.len(),
+        1,
+        "the founder alone is equipped"
     );
     assert_eq!(
-        op.witness(&guess, TIER2, 7).unwrap_err(),
-        ProtocolError::Rejected
+        alice.fetch_key.as_ref().unwrap(),
+        &op.fetch_key_now(),
+        "the body's fetch key is the epoch's"
     );
 
-    // The bulletin-delivered key serves.
-    let key_now = WitnessKey::new(*alice.witness_key.as_ref().unwrap().expose());
-    assert!(op.witness(&key_now, TIER2, 0).is_ok());
-
-    // The boundary rotates it: the old key is dead, the new bulletin's works. This cut is
-    // what ends a revoked member's witness service (§11).
-    advance(&mut op, &mut [&mut alice]);
+    // A pending candidate: the statement verifies, but no ciphertext is theirs.
+    let mut bob = member(0x12);
+    bob.statement_key = Some(op.statement_key());
     assert_eq!(
-        op.witness(&key_now, TIER2, 0).unwrap_err(),
-        ProtocolError::Rejected
+        bob.receive(&genesis).unwrap_err(),
+        ProtocolError::Unavailable
     );
-    assert!(op
-        .witness(alice.witness_key.as_ref().unwrap(), TIER2, 0)
-        .is_ok());
+
+    // A stranger holding the envelope cannot open the founder's ciphertext: the seal is
+    // to Alice's inbox key. Even the lookup tag is not theirs to compute.
+    let stranger = member(0x13);
+    let stranger_secret = nymora_protocol::load_inbox_secret(AGORA, &stranger.store).unwrap();
+    let alice_tag = own_lookup_tag(
+        &nymora_protocol::load_inbox_secret(AGORA, &alice.store).unwrap(),
+        &genesis.ephemeral_key,
+        &TIER2,
+    )
+    .unwrap();
+    assert_ne!(
+        own_lookup_tag(&stranger_secret, &genesis.ephemeral_key, &TIER2).unwrap(),
+        alice_tag
+    );
+    let mut sealed = genesis.ciphertext(&alice_tag).unwrap().bytes.clone();
+    assert!(open_own_ciphertext(
+        &stranger_secret,
+        &genesis.ephemeral_key,
+        &AGORA,
+        genesis.epoch,
+        &TIER2,
+        &mut sealed
+    )
+    .is_err());
+
+    // Bob lands at the boundary: two ciphertexts, and his opens.
+    admit(&mut op, &mut bob, &[&alice], 0x51);
+    let envelope = op.advance_epoch().unwrap();
+    assert_eq!(envelope.ciphertexts.len(), 2);
+    alice.apply_envelope(&envelope);
+    bob.apply_envelope(&envelope);
+    assert_eq!(bob.path.unwrap().index(), bob.position);
+    assert_eq!(bob.position % 2, 0, "leaves occupy even positions");
 }
 
 // ---- §11: the bulletin is a signed operator statement (proposal 0024) ----
 
-/// The bulletin carries its own authenticity: the operator's signature admits it, a
+/// The envelope carries its own authenticity: the operator's signature admits it, a
 /// tampered field refuses, a replayed boundary refuses on monotonicity, another agora's
 /// binding refuses structurally, the embedded head is the log's own latest — and two
-/// validly signed divergent bulletins for one epoch are portable fork evidence.
+/// validly signed divergent envelopes for one epoch are portable fork evidence.
 #[test]
-fn the_bulletin_is_a_signed_operator_statement() {
+fn the_envelope_is_a_signed_operator_statement() {
     let mut alice = member(0x11);
     let mut op = founded(&mut alice, true);
     let key = op.statement_key();
 
     // The embedded head is exactly the log's latest signed head (§10.1 binding).
-    let bulletin = op.current_bulletin().unwrap();
-    let embedded = bulletin
+    let envelope = op.current_envelope().unwrap();
+    let embedded = envelope
         .head
         .as_ref()
         .expect("a logged agora embeds a head");
@@ -201,27 +253,34 @@ fn the_bulletin_is_a_signed_operator_statement() {
     assert_eq!(embedded.head, latest.head);
     assert_eq!(embedded.signature, latest.signature);
 
-    // The genuine article verifies; a tampered field does not.
-    assert!(accept_bulletin(&key, &bulletin.statement(AGORA), &bulletin.signature, None).is_ok());
-    let mut tampered = op.current_bulletin().unwrap();
-    tampered.revocation_root = nymora_core::Root::from_bytes([0x66; 32]);
+    // The genuine article verifies; a tampered body — the single body every member
+    // shares — does not, and neither does a dropped ciphertext.
+    assert!(accept_envelope(&key, &envelope.statement(AGORA), &envelope.signature, None).is_ok());
+    let mut tampered = op.current_envelope().unwrap();
+    tampered.body[0] ^= 1;
     assert_eq!(
-        accept_bulletin(&key, &tampered.statement(AGORA), &tampered.signature, None).unwrap_err(),
+        accept_envelope(&key, &tampered.statement(AGORA), &tampered.signature, None).unwrap_err(),
         ProtocolError::Malformed,
-        "a swapped root verified"
+        "a tampered body verified"
+    );
+    let mut dropped = op.current_envelope().unwrap();
+    dropped.ciphertexts.clear();
+    assert!(
+        accept_envelope(&key, &dropped.statement(AGORA), &dropped.signature, None).is_err(),
+        "a dropped ciphertext verified"
     );
 
     // Another agora's binding refuses structurally — the agora is inside the digest.
     let elsewhere = AgoraId::from_bytes([0x0b; 32]);
     assert!(
-        accept_bulletin(
+        accept_envelope(
             &key,
-            &bulletin.statement(elsewhere),
-            &bulletin.signature,
+            &envelope.statement(elsewhere),
+            &envelope.signature,
             None
         )
         .is_err(),
-        "a bulletin verified into a foreign agora"
+        "an envelope verified into a foreign agora"
     );
 
     // A key the member never pinned refuses.
@@ -229,30 +288,30 @@ fn the_bulletin_is_a_signed_operator_statement() {
         &nymora_crypto::signature::mint_signing_secret([0x77; 32]),
     )
     .expect("minted keys are canonical");
-    assert!(accept_bulletin(
+    assert!(accept_envelope(
         &wrong,
-        &bulletin.statement(AGORA),
-        &bulletin.signature,
+        &envelope.statement(AGORA),
+        &envelope.signature,
         None
     )
     .is_err());
 
-    // Replay: after the boundary, the old bulletin's valid signature does not move the
+    // Replay: after the boundary, the old envelope's valid signature does not move the
     // member back — monotonicity refuses it (§11's forced boundary survives transit).
     advance(&mut op, &mut [&mut alice]);
     assert_eq!(
-        accept_bulletin(
+        accept_envelope(
             &key,
-            &bulletin.statement(AGORA),
-            &bulletin.signature,
+            &envelope.statement(AGORA),
+            &envelope.signature,
             alice.epoch
         )
         .unwrap_err(),
         ProtocolError::Malformed,
-        "a replayed pre-boundary bulletin was accepted"
+        "a replayed pre-boundary envelope was accepted"
     );
 
-    // Equivocation: one statement key signing two divergent bulletins for one epoch is
+    // Equivocation: one statement key signing two divergent envelopes for one epoch is
     // portable proof of a fork. Two operators sharing a statement seed and agora but
     // differing in content stand in for the forking operator.
     let mallory = member(0x21);
@@ -268,23 +327,24 @@ fn the_bulletin_is_a_signed_operator_statement() {
             },
         )],
         founder_classes: &[TIER2],
+        founder_inbox: mallory.inbox,
     };
     let fork_a: Op =
         AgoraState::create(StubProver, &founding, entropy(0x31), entropy(0x99), None).unwrap();
     let fork_b: Op =
         AgoraState::create(StubProver, &founding, entropy(0x32), entropy(0x99), None).unwrap();
-    let a = fork_a.current_bulletin().unwrap();
-    let b = fork_b.current_bulletin().unwrap();
+    let a = fork_a.current_envelope().unwrap();
+    let b = fork_b.current_envelope().unwrap();
     assert_eq!(fork_a.statement_key(), fork_b.statement_key());
-    assert!(bulletin_equivocation(
+    assert!(envelope_equivocation(
         &fork_a.statement_key(),
         &a.statement(AGORA),
         &a.signature,
         &b.statement(AGORA),
         &b.signature,
     ));
-    // The same bulletin twice accuses no one.
-    assert!(!bulletin_equivocation(
+    // The same envelope twice accuses no one.
+    assert!(!envelope_equivocation(
         &fork_a.statement_key(),
         &a.statement(AGORA),
         &a.signature,
@@ -296,15 +356,15 @@ fn the_bulletin_is_a_signed_operator_statement() {
 /// Mid-life re-delivery is a re-serve, not a re-sign: two fetches between epoch events
 /// produce the same statement digest and the same signature (proposal 0024).
 #[test]
-fn current_bulletin_is_re_served_byte_identically() {
+fn current_envelope_is_re_served_byte_identically() {
     let mut alice = member(0x11);
     let mut op = founded(&mut alice, true);
     let mut bob = member(0x12);
     admit(&mut op, &mut bob, &[&alice], 0x51);
     advance(&mut op, &mut [&mut alice, &mut bob]);
 
-    let first = op.current_bulletin().expect("agora is live");
-    let second = op.current_bulletin().expect("agora is live");
+    let first = op.current_envelope().expect("agora is live");
+    let second = op.current_envelope().expect("agora is live");
     assert_eq!(
         first.statement(AGORA).digest(),
         second.statement(AGORA).digest(),
@@ -318,11 +378,11 @@ fn current_bulletin_is_re_served_byte_identically() {
     // A real epoch event produces a new statement — the identity above is not
     // "every bulletin looks the same".
     advance(&mut op, &mut [&mut alice, &mut bob]);
-    let next = op.current_bulletin().expect("agora is live");
+    let next = op.current_envelope().expect("agora is live");
     assert_ne!(
         first.statement(AGORA).digest(),
         next.statement(AGORA).digest(),
-        "the next epoch's bulletin matched the previous statement"
+        "the next epoch's envelope matched the previous statement"
     );
 }
 
@@ -339,12 +399,14 @@ fn the_bootstrap_arc_reaches_a_governed_group() {
     let mut bob = member(0x12);
     admit(&mut op, &mut bob, &[&alice], 0x51);
 
-    // Bob is not yet present: admission lands at the boundary (proposal 0020).
-    let alice_key = alice.witness_key.as_ref().unwrap();
+    // Bob is not yet present: admission lands at the boundary (proposal 0020), and until
+    // then the envelope carries nothing for him.
+    let staged = op.current_envelope().unwrap();
+    assert_eq!(staged.ciphertexts.len(), 1);
     assert_eq!(
-        op.witness(alice_key, TIER2, bob.position).unwrap_err(),
-        ProtocolError::Rejected,
-        "an unlanded leaf served a witness"
+        bob.receive(&staged).unwrap_err(),
+        ProtocolError::Unavailable,
+        "an unlanded leaf was equipped"
     );
     advance(&mut op, &mut [&mut alice, &mut bob]);
 
@@ -384,7 +446,7 @@ fn the_bootstrap_arc_reaches_a_governed_group() {
 
     // Charlie at threshold 2: one attestation no longer admits.
     let mut charlie = Member::<DEPTH>::enroll(0x13, AGORA, TIER2, op.current_epoch());
-    op.credentials_init(charlie.leaf).unwrap();
+    op.credentials_init(charlie.leaf, charlie.inbox).unwrap();
     let session = op.start_vouch(charlie.leaf, TIER2, entropy(0x52)).unwrap();
     let (proof, n) = alice.vouch(&op, session);
     op.vouch_attest(session, &proof, n).unwrap();
@@ -428,11 +490,14 @@ fn vouch_sessions_disclose_nothing_and_die_with_their_epoch() {
     advance(&mut op, &mut [&mut alice, &mut bob]);
 
     let candidate = Member::<DEPTH>::enroll(0x14, AGORA, TIER2, op.current_epoch());
-    op.credentials_init(candidate.leaf).unwrap();
+    op.credentials_init(candidate.leaf, candidate.inbox)
+        .unwrap();
     // Idempotent, indistinguishable: initializing twice is the same acknowledgement.
     assert_eq!(
-        op.credentials_init(candidate.leaf).unwrap(),
-        op.credentials_init(candidate.leaf).unwrap()
+        op.credentials_init(candidate.leaf, candidate.inbox)
+            .unwrap(),
+        op.credentials_init(candidate.leaf, candidate.inbox)
+            .unwrap()
     );
 
     let session = op
@@ -648,7 +713,7 @@ fn a_stale_proof_is_refused_against_fresher_roots() {
     advance(&mut op, &mut [&mut alice, &mut bob]);
 
     // Bob cuts a valid migration proof against this epoch's roots.
-    let (_keys, _store, successor, spend, stale) = cut_migration(&op, &bob, 0x2b, 0x2c);
+    let (_keys, _store, successor, inbox, spend, stale) = cut_migration(&op, &bob, 0x2b, 0x2c);
 
     // The roots move: Charlie lands, the boundary snapshots a new class root.
     let mut charlie = Member::<DEPTH>::enroll(0x13, AGORA, TIER2, op.current_epoch());
@@ -656,15 +721,16 @@ fn a_stale_proof_is_refused_against_fresher_roots() {
     advance(&mut op, &mut [&mut alice, &mut bob, &mut charlie]);
 
     assert_eq!(
-        op.migrate(TIER2, &stale, spend, successor).unwrap_err(),
+        op.migrate(TIER2, &stale, spend, successor, inbox)
+            .unwrap_err(),
         ProtocolError::Rejected,
         "a stale proof was accepted against fresher roots"
     );
 
     // Bob is still current: a proof cut against the new roots is accepted. The
     // refusal above is the stale artifact, not the member.
-    let (_keys, _store, successor, spend, fresh) = cut_migration(&op, &bob, 0x2d, 0x2e);
-    op.migrate(TIER2, &fresh, spend, successor)
+    let (_keys, _store, successor, inbox, spend, fresh) = cut_migration(&op, &bob, 0x2d, 0x2e);
+    op.migrate(TIER2, &fresh, spend, successor, inbox)
         .expect("a current proof is accepted after the root move");
 }
 
@@ -790,7 +856,7 @@ fn revocation_ends_standing_at_its_own_boundary() {
         .expect("a member in good standing proves");
     });
     let pending = Member::<DEPTH>::enroll(0x15, AGORA, TIER2, op.current_epoch());
-    op.credentials_init(pending.leaf).unwrap();
+    op.credentials_init(pending.leaf, pending.inbox).unwrap();
     let open_session = op.start_vouch(pending.leaf, TIER2, entropy(0x56)).unwrap();
     let open_proposal = op
         .propose(
@@ -816,46 +882,87 @@ fn revocation_ends_standing_at_its_own_boundary() {
         .unwrap();
     alice.approve(&mut op, revoke);
     bob.approve(&mut op, revoke);
-    let bulletin = match op.execute(revoke).expect("quorum met") {
-        Executed::Revocation { bulletin } => bulletin,
+    let envelope = match op.execute(revoke).expect("quorum met") {
+        Executed::Revocation { envelope } => envelope,
         other => panic!("wrong execution effect: {other:?}"),
     };
+    let body = op.current_body().unwrap();
     assert!(
-        bulletin
+        body.revoked
+            .contains(&nymora_accumulator::exclusion::truncate_key(
+                &revocation_key(&charlie.leaf)
+            )),
+        "the body does not carry the revocation entry"
+    );
+    assert!(
+        !body
             .revoked
             .contains(&nymora_accumulator::exclusion::truncate_key(
                 charlie.leaf.as_bytes()
             )),
-        "the bulletin does not carry the revocation"
+        "the body carries a raw leaf"
     );
     assert_ne!(
-        bulletin.tag_key, tag_before,
+        body.tag_key, tag_before,
         "the tag key did not rotate at the revocation"
     );
 
-    // Delivery cut: remaining members apply the bulletin; Charlie receives nothing (§11).
-    alice.apply_bulletin(&bulletin);
-    bob.apply_bulletin(&bulletin);
+    // Delivery cut, literal (proposal 0036): remaining members find their ciphertexts;
+    // Charlie's is simply not in the envelope. Read capability ended at the revocation's
+    // own epoch, tag key included.
+    assert_eq!(envelope.ciphertexts.len(), 2);
+    alice.apply_envelope(&envelope);
+    bob.apply_envelope(&envelope);
+    assert_eq!(
+        charlie.receive(&envelope).unwrap_err(),
+        ProtocolError::Unavailable,
+        "a revoked credential was equipped"
+    );
 
-    // Charlie, even granted perfectly fresh witnesses — worst case, he obtained the
-    // bulletin anyway — cannot prove: his leaf is *in* the set the proof shows absence
-    // from. Write capability ended at the revocation's own epoch.
-    charlie.apply_bulletin(&bulletin);
-    charlie.acting(&op, |witness, epoch, roots| {
-        assert_eq!(
-            prove_authorship(
-                &StubProver,
-                witness,
-                AGORA,
-                epoch,
-                roots,
-                MessageHash::from_bytes([0xab; 32]),
-            )
-            .err(),
-            Some(ProtocolError::Malformed),
-            "a revoked credential produced a proof at the revocation's own epoch"
-        );
-    });
+    // And even with the material a compromised operator might leak him — the body —
+    // Charlie cannot prove: his entry is *in* the set the proof shows absence from.
+    let mut leaked = ExclusionSet::<DEPTH>::new();
+    for entry in &body.revoked {
+        leaked.insert(*entry);
+    }
+    let roots = EpochRoots {
+        class: body
+            .class_roots
+            .iter()
+            .find(|(class, _)| *class == TIER2)
+            .map(|(_, root)| *root)
+            .unwrap(),
+        revocation: body.revocation_root,
+        spend: body.spend_root,
+    };
+    charlie.roll(op.current_epoch());
+    let mut pk_buf = [0u8; 64];
+    let mut record_buf = [0u8; 256];
+    let material = load_acting_material(
+        AGORA,
+        &charlie.store,
+        op.current_epoch(),
+        &mut pk_buf,
+        &mut record_buf,
+    )
+    .unwrap();
+    let inclusion = charlie.path.unwrap();
+    let revocation_absence = leaked.absence_witness(&revocation_key(&charlie.leaf));
+    let spend_absence = charlie.spends.absence_witness(&charlie.spend_key());
+    let witness = material.witness(&inclusion, &revocation_absence, &spend_absence);
+    assert_eq!(
+        prove_authorship(
+            &StubProver,
+            &witness,
+            AGORA,
+            op.current_epoch(),
+            &roots,
+            MessageHash::from_bytes([0xab; 32]),
+        )
+        .err(),
+        Some(ProtocolError::Malformed),
+        "a revoked credential produced a proof at the revocation's own epoch"
+    );
 
     // Alice still proves — revocation touched one credential's standing, nothing else.
     alice.acting(&op, |witness, epoch, roots| {
@@ -905,25 +1012,42 @@ fn migration_is_accepted_spent_at_the_boundary_and_unrepeatable() {
             .expect("successor root");
     let successor_pk = &successor_pk_buf[..written.public_key];
 
+    // The old device destroys its acting material as it authorizes (0036); `bob`
+    // keeps a copy, standing in for material that escaped destruction, which is what
+    // the server-side window below is measured against.
+    let mut old_device = bob.store.clone();
     let mut old_pk = [0u8; 64];
     let mut cert = [0u8; 128];
+    let mut retire = [0u8; 128];
     let mut handoff_bytes = [0u8; 512];
     let len = authorize_migration(
         AGORA,
         &bob.keys,
-        &bob.store,
+        &mut old_device,
         successor_pk,
-        &mut old_pk,
-        &mut cert,
-        &mut handoff_bytes,
+        MigrationBuffers {
+            root_public_key: &mut old_pk,
+            signature: &mut cert,
+            retire_signature: &mut retire,
+            handoff: &mut handoff_bytes,
+        },
     )
     .expect("authorization succeeds");
+    assert!(!old_device.holds(AGORA, Slot::InboxKey));
+    assert!(!old_device.holds(AGORA, Slot::EpochKey(op.current_epoch())));
     let handoff =
         nymora_core::MigrationHandoff::decode(&handoff_bytes[..len]).expect("handoff decodes");
 
     let mut new_store = TestStore::default();
-    let migrated = complete_migration(AGORA, &mut new_store, &handoff, successor_pk, entropy(0x2c))
-        .expect("completion succeeds");
+    let migrated = complete_migration(
+        AGORA,
+        &mut new_store,
+        &handoff,
+        successor_pk,
+        entropy(0x2c),
+        entropy(0x2f),
+    )
+    .expect("completion succeeds");
 
     // The successor proves the migration against the current epoch's fixed roots.
     let mut stored_opening = [0u8; 32];
@@ -932,10 +1056,8 @@ fn migration_is_accepted_spent_at_the_boundary_and_unrepeatable() {
         .unwrap()
         .expect("successor opening stored");
     let successor_opening = RootOpening::new(stored_opening);
-    let inclusion = op
-        .witness(bob.witness_key.as_ref().unwrap(), TIER2, bob.position)
-        .unwrap();
-    let revocation_absence = bob.revocations.absence_witness(bob.leaf.as_bytes());
+    let inclusion = bob.path.expect("equipped");
+    let revocation_absence = bob.revocations.absence_witness(&revocation_key(&bob.leaf));
     let witness = MigrationWitness {
         old_root_public_key: handoff.root_public_key,
         old_root_opening: &handoff.root_opening,
@@ -959,14 +1081,14 @@ fn migration_is_accepted_spent_at_the_boundary_and_unrepeatable() {
     assert_eq!(spend, migrated.spend);
 
     let admission = op
-        .migrate(TIER2, &proof, spend, migrated.commitment)
+        .migrate(TIER2, &proof, spend, migrated.commitment, migrated.inbox)
         .expect("the operator accepts");
     assert_eq!(admission.active_from, op.current_epoch().next().unwrap());
 
     // A second successor from the same old leaf refuses immediately — the spend is
     // staged, and one leaf admits one successor (§9.3).
     assert_eq!(
-        op.migrate(TIER2, &proof, spend, migrated.commitment)
+        op.migrate(TIER2, &proof, spend, migrated.commitment, migrated.inbox)
             .unwrap_err(),
         ProtocolError::Rejected
     );
@@ -985,15 +1107,15 @@ fn migration_is_accepted_spent_at_the_boundary_and_unrepeatable() {
     });
 
     // The boundary: the spend lands and is broadcast — in the truncated ordering
-    // domain the exclusion sets hold keys in (proposal 0035).
-    let bulletin = op.advance_epoch().unwrap();
-    assert!(bulletin
-        .spent
-        .contains(&nymora_accumulator::exclusion::truncate_key(
-            spend.as_bytes()
-        )));
-    alice.apply_bulletin(&bulletin);
-    bob.apply_bulletin(&bulletin);
+    // domain the exclusion sets hold keys in (proposal 0035). The predecessor's
+    // ciphertext is still produced: the spend does not name the consumed leaf, so the
+    // operator cannot retire its inbox — that is the successor's later, opt-in act.
+    let envelope = op.advance_epoch().unwrap();
+    assert!(op.current_body().unwrap().spent.contains(
+        &nymora_accumulator::exclusion::truncate_key(spend.as_bytes())
+    ));
+    alice.apply_envelope(&envelope);
+    bob.apply_envelope(&envelope);
 
     // The far edge: the predecessor refuses even with fresh witnesses.
     bob.acting(&op, |witness, epoch, roots| {
@@ -1014,7 +1136,7 @@ fn migration_is_accepted_spent_at_the_boundary_and_unrepeatable() {
 
     // And a post-boundary repeat of the migration refuses off the landed set.
     assert_eq!(
-        op.migrate(TIER2, &proof, spend, migrated.commitment)
+        op.migrate(TIER2, &proof, spend, migrated.commitment, migrated.inbox)
             .unwrap_err(),
         ProtocolError::Rejected
     );
@@ -1027,16 +1149,18 @@ fn migration_is_accepted_spent_at_the_boundary_and_unrepeatable() {
         keys: successor_keys,
         store: new_store,
         leaf: migrated.commitment,
+        inbox: migrated.inbox,
         position: admission.position,
         revocations: ExclusionSet::new(),
         spends: ExclusionSet::new(),
         tag_keys: Vec::new(),
         roots: None,
-        witness_key: None,
+        path: None,
+        fetch_key: None,
         statement_key: Some(op.statement_key()),
         epoch: None,
     };
-    successor.apply_bulletin(&bulletin);
+    successor.apply_envelope(&envelope);
     successor.acting(&op, |witness, epoch, roots| {
         prove_authorship(
             &StubProver,
@@ -1048,6 +1172,153 @@ fn migration_is_accepted_spent_at_the_boundary_and_unrepeatable() {
         )
         .expect("the successor acts from its boundary");
     });
+
+    // Retirement (§9.3, proposal 0036): the successor submits the certificate the old
+    // device signed, under a proof that the old leaf's root key issued it; the next
+    // envelope no longer carries the predecessor's ciphertext. A proof over one key
+    // retires no other, and a proof bound to one leaf serves no other.
+    let old_inbox = bob.inbox;
+    let mut old_pk_buf = [0u8; 64];
+    let old_material = load_inbox_material(AGORA, &bob.store, &mut old_pk_buf)
+        .expect("the copy still opens the old leaf");
+    let retire_proof = prove_inbox::<StubProver, DEPTH>(
+        &StubProver,
+        &old_material.witness(handoff.retire_cert),
+        AGORA,
+        bob.leaf,
+        old_inbox,
+        InboxAction::Retire,
+    )
+    .expect("the old root signed it");
+    assert_eq!(
+        op.inbox_certificate(
+            bob.leaf,
+            InboxPublicKey::from_bytes([0x5e; 32]),
+            InboxAction::Retire,
+            &retire_proof
+        )
+        .unwrap_err(),
+        ProtocolError::Rejected,
+        "a proof over one key retired another"
+    );
+    assert_eq!(
+        op.inbox_certificate(
+            successor.leaf,
+            old_inbox,
+            InboxAction::Retire,
+            &retire_proof
+        )
+        .unwrap_err(),
+        ProtocolError::Rejected,
+        "a proof bound to one leaf served another"
+    );
+    op.inbox_certificate(bob.leaf, old_inbox, InboxAction::Retire, &retire_proof)
+        .expect("the successor retires the old inbox");
+    let after = op.advance_epoch().unwrap();
+    assert_eq!(
+        bob.receive(&after).unwrap_err(),
+        ProtocolError::Unavailable,
+        "a retired inbox was still delivered to"
+    );
+    successor.apply_envelope(&after);
+}
+
+/// Renewal keeps a live credential delivered to past the horizon; an unrenewed one lapses
+/// at it; the horizon is a quorum decision with a protocol floor (§11, proposal 0036).
+#[test]
+fn inbox_registrations_lapse_at_the_horizon_unless_renewed() {
+    let mut alice = member(0x11);
+    let mut op = founded(&mut alice, false);
+    let mut bob = member(0x12);
+    admit(&mut op, &mut bob, &[&alice], 0x51);
+    advance(&mut op, &mut [&mut alice, &mut bob]);
+
+    // Below the floor refuses to open; at the floor it opens and executes.
+    assert_eq!(
+        op.propose(
+            Decision::InboxHorizon {
+                boundaries: MIN_INBOX_HORIZON - 1
+            },
+            TIER2,
+            entropy(0x66)
+        )
+        .unwrap_err(),
+        ProtocolError::Malformed
+    );
+    let subject = op
+        .propose(
+            Decision::InboxHorizon {
+                boundaries: MIN_INBOX_HORIZON,
+            },
+            TIER2,
+            entropy(0x67),
+        )
+        .unwrap();
+    alice.approve(&mut op, subject);
+    match op.execute(subject).unwrap() {
+        Executed::InboxHorizon { boundaries } => assert_eq!(boundaries, MIN_INBOX_HORIZON),
+        other => panic!("wrong execution effect: {other:?}"),
+    }
+    assert_eq!(op.inbox_horizon(), MIN_INBOX_HORIZON);
+
+    // Three boundaries on, Alice renews with a fresh key — proving her leaf's root key
+    // issued the instruction — while Bob lets his registration age out from the epoch
+    // it landed at.
+    let bob_since = op.current_epoch();
+    for _ in 0..3 {
+        advance(&mut op, &mut [&mut alice, &mut bob]);
+    }
+    let fresh_secret =
+        nymora_core::InboxSecretKey::new(nymora_crypto::inbox::mint_inbox_secret([0x1f; 32]));
+    let fresh = nymora_crypto::inbox::inbox_public_key(&fresh_secret);
+    let mut sig = [0u8; 64];
+    let len = sign_inbox_cert(AGORA, &alice.keys, InboxAction::Renew, &fresh, &mut sig).unwrap();
+    let mut pk_buf = [0u8; 64];
+    let material = load_inbox_material(AGORA, &alice.store, &mut pk_buf).unwrap();
+    let proof = prove_inbox::<StubProver, DEPTH>(
+        &StubProver,
+        &material.witness(&sig[..len]),
+        AGORA,
+        alice.leaf,
+        fresh,
+        InboxAction::Renew,
+    )
+    .unwrap();
+    // Bob cannot renew Alice's leaf: the proof is bound to hers.
+    assert_eq!(
+        op.inbox_certificate(bob.leaf, fresh, InboxAction::Renew, &proof)
+            .unwrap_err(),
+        ProtocolError::Rejected
+    );
+    op.inbox_certificate(alice.leaf, fresh, InboxAction::Renew, &proof)
+        .expect("alice renews");
+    alice
+        .store
+        .store(AGORA, Slot::InboxKey, fresh_secret.expose())
+        .unwrap();
+
+    // Bob's registration began at his landing; it lapses exactly `horizon` boundaries
+    // later. Alice's renewal reset hers, so she is still delivered to at that epoch and
+    // after it.
+    loop {
+        let envelope = op.advance_epoch().unwrap();
+        alice.apply_envelope(&envelope);
+        match bob.receive(&envelope) {
+            Ok(()) => assert!(
+                op.current_epoch().get() < bob_since.get() + MIN_INBOX_HORIZON,
+                "bob outlived the horizon"
+            ),
+            Err(ProtocolError::Unavailable) => break,
+            Err(other) => panic!("unexpected: {other:?}"),
+        }
+    }
+    assert_eq!(
+        op.current_epoch().get(),
+        bob_since.get() + MIN_INBOX_HORIZON,
+        "bob lapsed at the wrong boundary"
+    );
+    let envelope = op.advance_epoch().unwrap();
+    alice.apply_envelope(&envelope);
 }
 
 // ---- §10.1: the transparency log ----
@@ -1172,7 +1443,7 @@ fn dissolution_freezes_the_agora_terminally() {
 
     // Everything refuses now — mutation and service alike.
     assert_eq!(
-        op.credentials_init(bob.leaf).unwrap_err(),
+        op.credentials_init(bob.leaf, bob.inbox).unwrap_err(),
         ProtocolError::Rejected
     );
     assert_eq!(
@@ -1189,12 +1460,8 @@ fn dissolution_freezes_the_agora_terminally() {
             .unwrap_err(),
         ProtocolError::Rejected
     );
-    assert_eq!(op.current_bulletin().unwrap_err(), ProtocolError::Rejected);
-    assert_eq!(
-        op.witness(bob.witness_key.as_ref().unwrap(), TIER2, 0)
-            .unwrap_err(),
-        ProtocolError::Rejected
-    );
+    assert_eq!(op.current_envelope().unwrap_err(), ProtocolError::Rejected);
+    assert_eq!(op.current_body().unwrap_err(), ProtocolError::Rejected);
 
     // Bob's cached copy still verifies the historical attestation — §12: checkable for as
     // long as any member retains a cached copy.
@@ -1224,7 +1491,7 @@ fn dissolution_freezes_the_agora_terminally() {
 /// after attestations were gathered, and counted against staged seats too.
 #[test]
 fn an_exhausted_class_refuses_at_the_door() {
-    const TINY: usize = 1; // capacity 2
+    const TINY: usize = 2; // two leaves at even positions (proposal 0036)
     let mut alice = Member::<TINY>::enroll(0x11, AGORA, TIER2, GENESIS);
     let mut op: AgoraState<StubProver, TINY> = found(&mut alice, 0x1b, None);
 
@@ -1234,7 +1501,7 @@ fn an_exhausted_class_refuses_at_the_door() {
 
     // A third candidate is refused at the door: the staged seat already counts.
     let third = member(0x13);
-    op.credentials_init(third.leaf).unwrap();
+    op.credentials_init(third.leaf, third.inbox).unwrap();
     assert_eq!(
         op.start_vouch(third.leaf, TIER2, entropy(0x52))
             .unwrap_err(),
@@ -1310,6 +1577,7 @@ fn a_zero_threshold_founding_is_malformed() {
                 },
             )],
             founder_classes: &[TIER2],
+            founder_inbox: alice.inbox,
         },
         entropy(0x1b),
         entropy(0x1d),
@@ -1328,7 +1596,7 @@ fn a_candidate_lands_at_most_once() {
     let mut alice = member(0x11);
     let mut op = founded(&mut alice, false);
     let mut bob = member(0x12);
-    op.credentials_init(bob.leaf).unwrap();
+    op.credentials_init(bob.leaf, bob.inbox).unwrap();
     bob.statement_key = Some(op.statement_key());
     let first = op.start_vouch(bob.leaf, TIER2, entropy(0x51)).unwrap();
     let second = op.start_vouch(bob.leaf, TIER2, entropy(0x52)).unwrap();
@@ -1348,15 +1616,11 @@ fn a_candidate_lands_at_most_once() {
         "the second finalize staged the same leaf twice"
     );
 
-    // The boundary lands exactly one seat: Bob's position serves, the next is empty.
+    // The boundary lands exactly one seat: two members, two ciphertexts, Bob's at his
+    // admitted position.
     advance(&mut op, &mut [&mut alice, &mut bob]);
-    let key = bob.witness_key.as_ref().unwrap();
-    assert!(op.witness(key, TIER2, bob.position).is_ok());
-    assert_eq!(
-        op.witness(key, TIER2, bob.position + 1).unwrap_err(),
-        ProtocolError::Rejected,
-        "a second copy of the leaf landed"
-    );
+    assert_eq!(op.current_envelope().unwrap().ciphertexts.len(), 2);
+    assert_eq!(bob.path.unwrap().index(), bob.position);
 }
 
 /// A staging refusal cannot consume the old leaf: a verified migration into a full class
@@ -1364,7 +1628,7 @@ fn a_candidate_lands_at_most_once() {
 /// (proposal 0026). Before the fix, the spend staged first and the refusal burned it.
 #[test]
 fn a_refused_migration_does_not_burn_the_spend() {
-    const TINY: usize = 1; // capacity 2
+    const TINY: usize = 2; // two leaves at even positions (proposal 0036)
     let mut alice = Member::<TINY>::enroll(0x11, AGORA, TIER2, GENESIS);
     let mut op: AgoraState<StubProver, TINY> = found(&mut alice, 0x1b, None);
     let mut bob = Member::<TINY>::enroll(0x12, AGORA, TIER2, GENESIS);
@@ -1380,24 +1644,36 @@ fn a_refused_migration_does_not_burn_the_spend() {
             .expect("successor root");
     let successor_pk = &successor_pk_buf[..written.public_key];
 
+    let mut old_device = bob.store.clone();
     let mut old_pk = [0u8; 64];
     let mut cert = [0u8; 128];
+    let mut retire = [0u8; 128];
     let mut handoff_bytes = [0u8; 512];
     let len = authorize_migration(
         AGORA,
         &bob.keys,
-        &bob.store,
+        &mut old_device,
         successor_pk,
-        &mut old_pk,
-        &mut cert,
-        &mut handoff_bytes,
+        MigrationBuffers {
+            root_public_key: &mut old_pk,
+            signature: &mut cert,
+            retire_signature: &mut retire,
+            handoff: &mut handoff_bytes,
+        },
     )
     .expect("authorization succeeds");
     let handoff =
         nymora_core::MigrationHandoff::decode(&handoff_bytes[..len]).expect("handoff decodes");
     let mut new_store = TestStore::default();
-    let migrated = complete_migration(AGORA, &mut new_store, &handoff, successor_pk, entropy(0x2c))
-        .expect("completion succeeds");
+    let migrated = complete_migration(
+        AGORA,
+        &mut new_store,
+        &handoff,
+        successor_pk,
+        entropy(0x2c),
+        entropy(0x2f),
+    )
+    .expect("completion succeeds");
 
     let mut stored_opening = [0u8; 32];
     new_store
@@ -1405,10 +1681,8 @@ fn a_refused_migration_does_not_burn_the_spend() {
         .unwrap()
         .expect("successor opening stored");
     let successor_opening = RootOpening::new(stored_opening);
-    let inclusion = op
-        .witness(bob.witness_key.as_ref().unwrap(), TIER2, bob.position)
-        .unwrap();
-    let revocation_absence = bob.revocations.absence_witness(bob.leaf.as_bytes());
+    let inclusion = bob.path.expect("equipped");
+    let revocation_absence = bob.revocations.absence_witness(&revocation_key(&bob.leaf));
     let witness = MigrationWitness {
         old_root_public_key: handoff.root_public_key,
         old_root_opening: &handoff.root_opening,
@@ -1431,7 +1705,7 @@ fn a_refused_migration_does_not_burn_the_spend() {
     .expect("the migration proves");
 
     assert_eq!(
-        op.migrate(TIER2, &proof, spend, migrated.commitment)
+        op.migrate(TIER2, &proof, spend, migrated.commitment, migrated.inbox)
             .unwrap_err(),
         ProtocolError::Rejected,
         "a full class accepted a successor"
@@ -1439,13 +1713,13 @@ fn a_refused_migration_does_not_burn_the_spend() {
 
     // The refusal consumed nothing: no spend in the boundary broadcast, and the old
     // device still acts with its standing intact.
-    let bulletin = op.advance_epoch().unwrap();
+    let envelope = op.advance_epoch().unwrap();
     assert!(
-        !bulletin.spent.contains(spend.as_bytes()),
+        !op.current_body().unwrap().spent.contains(spend.as_bytes()),
         "a refused migration burned the spend"
     );
-    alice.apply_bulletin(&bulletin);
-    bob.apply_bulletin(&bulletin);
+    alice.apply_envelope(&envelope);
+    bob.apply_envelope(&envelope);
     bob.acting(&op, |witness, epoch, roots| {
         prove_authorship(
             &StubProver,
@@ -1471,7 +1745,7 @@ fn a_revoked_credential_cannot_migrate() {
     advance(&mut op, &mut [&mut alice, &mut bob]);
 
     // Bob prepares a successor while still current.
-    let (_keys, _store, successor, spend, proof) = cut_migration(&op, &bob, 0x2b, 0x2c);
+    let (_keys, _store, successor, inbox, spend, proof) = cut_migration(&op, &bob, 0x2b, 0x2c);
 
     // Alice revokes Bob. Governance is still 1.
     let revoke = op
@@ -1482,28 +1756,47 @@ fn a_revoked_credential_cannot_migrate() {
         )
         .unwrap();
     alice.approve(&mut op, revoke);
-    let bulletin = match op.execute(revoke).expect("quorum met") {
-        Executed::Revocation { bulletin } => bulletin,
+    let envelope = match op.execute(revoke).expect("quorum met") {
+        Executed::Revocation { envelope } => envelope,
         other => panic!("wrong execution effect: {other:?}"),
     };
-    alice.apply_bulletin(&bulletin);
-    // Worst case: Bob obtained the bulletin anyway (§11).
-    bob.apply_bulletin(&bulletin);
+    alice.apply_envelope(&envelope);
+    // The cut: nothing in the envelope is Bob's (§11, proposal 0036).
+    assert_eq!(
+        bob.receive(&envelope).unwrap_err(),
+        ProtocolError::Unavailable
+    );
+    // Worst case: a leaky operator hands him the body anyway. He rebuilds the sets.
+    let body = op.current_body().unwrap();
+    bob.revocations = ExclusionSet::new();
+    for entry in &body.revoked {
+        bob.revocations.insert(*entry);
+    }
+    bob.roots = Some(EpochRoots {
+        class: body
+            .class_roots
+            .iter()
+            .find(|(class, _)| *class == TIER2)
+            .map(|(_, root)| *root)
+            .unwrap(),
+        revocation: body.revocation_root,
+        spend: body.spend_root,
+    });
 
     // The operator refuses the proof cut while Bob was current — the roots have
     // moved, and standing is checked at the action.
     assert_eq!(
-        op.migrate(TIER2, &proof, spend, successor).unwrap_err(),
+        op.migrate(TIER2, &proof, spend, successor, inbox)
+            .unwrap_err(),
         ProtocolError::Rejected,
         "a revoked credential's migration was accepted"
     );
 
-    // And a fresh attempt cannot assemble: the old leaf is in the set the
-    // statement shows absence from.
-    let inclusion = op
-        .witness(bob.witness_key.as_ref().unwrap(), TIER2, bob.position)
-        .unwrap();
-    let revocation_absence = bob.revocations.absence_witness(bob.leaf.as_bytes());
+    // And a fresh attempt cannot assemble: the old leaf's entry is in the set the
+    // statement shows absence from. (No admission landed at the revocation boundary,
+    // so the class root — and Bob's cached path — are unchanged.)
+    let inclusion = bob.path.expect("equipped before the revocation");
+    let revocation_absence = bob.revocations.absence_witness(&revocation_key(&bob.leaf));
     let successor_keys = SoftwareKeyStore::new([0x2d; 32]);
     let mut successor_pk_buf = [0u8; 64];
     let mut binding = [0u8; 64];
@@ -1511,24 +1804,36 @@ fn a_revoked_credential_cannot_migrate() {
         create_successor_root(AGORA, &successor_keys, &mut successor_pk_buf, &mut binding)
             .expect("successor root");
     let successor_pk = &successor_pk_buf[..written.public_key];
+    let mut old_device = bob.store.clone();
     let mut old_pk = [0u8; 64];
     let mut cert = [0u8; 128];
+    let mut retire = [0u8; 128];
     let mut handoff_bytes = [0u8; 512];
     let len = authorize_migration(
         AGORA,
         &bob.keys,
-        &bob.store,
+        &mut old_device,
         successor_pk,
-        &mut old_pk,
-        &mut cert,
-        &mut handoff_bytes,
+        MigrationBuffers {
+            root_public_key: &mut old_pk,
+            signature: &mut cert,
+            retire_signature: &mut retire,
+            handoff: &mut handoff_bytes,
+        },
     )
     .expect("authorization succeeds");
     let handoff =
         nymora_core::MigrationHandoff::decode(&handoff_bytes[..len]).expect("handoff decodes");
     let mut new_store = TestStore::default();
-    let migrated = complete_migration(AGORA, &mut new_store, &handoff, successor_pk, entropy(0x2e))
-        .expect("completion succeeds");
+    let migrated = complete_migration(
+        AGORA,
+        &mut new_store,
+        &handoff,
+        successor_pk,
+        entropy(0x2e),
+        entropy(0x2f),
+    )
+    .expect("completion succeeds");
     let mut stored_opening = [0u8; 32];
     new_store
         .load(AGORA, Slot::RootOpening, &mut stored_opening)

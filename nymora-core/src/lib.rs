@@ -37,12 +37,13 @@ mod domain;
 mod epoch;
 mod error;
 mod handoff;
+mod inbox;
 mod policy;
 mod secret;
 
 pub use agora::{AgoraId, CeremonyMode, PublicParameters};
 pub use bundle::{Attestation, Bundle, FORMAT_VERSION};
-pub use certificate::{EpochCertPayload, MigrationCertPayload};
+pub use certificate::{EpochCertPayload, InboxAction, InboxCertPayload, MigrationCertPayload};
 pub use digest::{
     Commitment, LedgerHash, MessageHash, Nullifier, Root, SessionCommitment, SessionContext,
     SessionPseudonym, Tag, DIGEST_LEN,
@@ -51,8 +52,12 @@ pub use domain::{field_domain, Domain};
 pub use epoch::Epoch;
 pub use error::{LocalReason, ProtocolError, Rejection};
 pub use handoff::{MigrationHandoff, HANDOFF_VERSION};
+pub use inbox::{InboxPublicKey, InboxTag, INBOX_PUBLIC_KEY_LEN, INBOX_TAG_LEN};
 pub use policy::PolicyClass;
-pub use secret::{CredentialKey, EpochSecretKey, RootOpening, SecretBytes, TagKey, WitnessKey};
+pub use secret::{
+    BodyKey, CredentialKey, EpochSecretKey, FetchKey, InboxSecretKey, RootOpening, SecretBytes,
+    TagKey,
+};
 
 #[cfg(test)]
 extern crate std;

@@ -157,9 +157,10 @@ domains! {
 
     /// Derivation of an agora's per-epoch witness-service key (§5.2, proposal 0025).
     ///
-    /// Distinct from [`Domain::TagKey`] although both derive from the same operator
-    /// secret: the tag key resolves content, the witness key gates the inclusion-witness
-    /// service, and a shared derivation would make leaking one leak both.
+    /// Reserved: the witness service retired with proposal 0036 — inclusion paths are
+    /// delivered per member in the boundary broadcast, so no key gates them. The tag
+    /// stays because this registry is permanent — removing and later re-adding one would
+    /// be indistinguishable from a redefinition.
     WitnessKey => "nymora/v0/witness/key",
 
     /// The subject identifier of a policy-change proposal (§4.3).
@@ -204,6 +205,46 @@ domains! {
     /// identifier is hashed here, length-framed as always, and the digest enters the
     /// field by the truncation rule of proposal 0035.
     ActionContext => "nymora/v0/action-context",
+
+    /// Derivation of an agora's per-epoch fetch key, `K_fetch_e` (§11, proposal 0036) —
+    /// what gates fetching the boundary envelope.
+    ///
+    /// Distinct from [`Domain::TagKey`] although both derive from the same operator
+    /// secret. Its blast radius is stated in full: a leaked fetch key reveals that the
+    /// agora exists and how many ciphertexts it published, and nothing behind them.
+    FetchKey => "nymora/v0/fetch/key",
+
+    /// Derivation of the per-epoch body key, `K_body_e`, under which the shared bulletin
+    /// body is encrypted **once** for every member (§11, proposal 0036's single-body
+    /// rule). Delivered to each member inside their own ciphertext.
+    BodyKey => "nymora/v0/envelope/key",
+
+    /// Derivation of the operator's per-boundary ephemeral agreement key (§11, proposal
+    /// 0036): one X25519 key per envelope, derived from the operator secret so replay
+    /// reconstructs the envelope byte for byte.
+    InboxEphemeral => "nymora/v0/inbox/ephemeral",
+
+    /// Derivation of one member's ciphertext key from the agreed secret (§11, proposal
+    /// 0036): `HKDF(shared, ephemeral_pk ‖ inbox_pk ‖ class)`.
+    InboxSeal => "nymora/v0/inbox/seal",
+
+    /// Derivation of the short lookup tag a member finds their ciphertext by (§11,
+    /// proposal 0036) — from the same agreed secret under its own domain, so the tag
+    /// reveals nothing about the key.
+    InboxTag => "nymora/v0/inbox/tag",
+
+    /// The associated data binding an encrypted bulletin body and every per-member
+    /// ciphertext to one agora and one epoch (§11, proposal 0036).
+    BulletinBody => "nymora/v0/envelope/body",
+
+    /// The digest of an envelope's per-member ciphertext list, absorbed into the signed
+    /// envelope statement (§11, proposal 0036).
+    EnvelopeCiphertexts => "nymora/v0/envelope/ciphertexts",
+
+    /// The subject identifier of an inbox-horizon proposal (§11, proposal 0036): the
+    /// per-agora policy value bounding how many boundaries an inbox registration lasts
+    /// before it must be renewed.
+    ProposalHorizon => "nymora/v0/proposal/horizon",
 }
 
 /// The field-domain registry: the constants leading every derivation the standardized
@@ -237,6 +278,17 @@ pub mod field_domain {
     /// m))` (§9.1). Signer-local by nature, registered because two implementations must
     /// still agree on it for vectors to reproduce.
     pub const NONCE: u64 = 7;
+    /// A revocation-set entry, `Poseidon(REVOKE, leaf)` (§11, proposal 0036): the
+    /// set holds this value rather than the leaf, so no broadcast carries a leaf and a
+    /// set entry cannot be linked to a path's neighbour value. A public function of the
+    /// leaf by necessity — the operator hashes at execution without the revoked member's
+    /// cooperation, and the member recomputes it for their own absence witness.
+    pub const REVOKE: u64 = 8;
+    /// The inbox-certificate message, `Poseidon(INBOX_CERT, agora, action, inbox_pk)`
+    /// (§9.3, proposal 0036): the root key's instruction about the credential's inbox
+    /// key — retire it, or (re)register it — verified inside the inbox statement against
+    /// the key committed in the leaf.
+    pub const INBOX_CERT: u64 = 9;
 
     /// The action tags absorbed by the [`ACTION`] derivation — in-band, constrained by
     /// the statement, and what keeps one action's output unreplayable as another's
@@ -253,6 +305,15 @@ pub mod field_domain {
         /// Verification access (§7): derives nothing — the output is constrained to
         /// zero (proposals 0019, 0035).
         pub const VERIFICATION: u64 = 4;
+    }
+
+    /// The actions an inbox certificate can instruct, absorbed into the [`INBOX_CERT`]
+    /// message so one instruction cannot replay as the other (proposal 0036).
+    pub mod inbox_action {
+        /// Stop encrypting to this inbox key — the planned-migration retirement (§9.3).
+        pub const RETIRE: u64 = 0;
+        /// (Re)register this inbox key and reset its horizon (§11's renewal).
+        pub const RENEW: u64 = 1;
     }
 }
 

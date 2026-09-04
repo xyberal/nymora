@@ -38,12 +38,13 @@ pub mod domains;
 mod evaluate;
 pub mod exclusion;
 mod gadgets;
+pub mod inbox;
 pub mod migration;
 pub mod primitives;
 pub mod system;
 pub mod tree;
 
-pub use evaluate::{satisfies_chain, satisfies_migration};
+pub use evaluate::{satisfies_chain, satisfies_inbox, satisfies_migration};
 
 /// The circuit field: the BLS12-381 scalar field (§6.5).
 pub type F = midnight_curves::Fq;

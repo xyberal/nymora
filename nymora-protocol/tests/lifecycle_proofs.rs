@@ -21,7 +21,7 @@ use nymora_proofs::{
 };
 use nymora_protocol::{
     authorize_migration, complete_migration, create, create_successor_root, load_acting_material,
-    FreshEntropy,
+    CredentialEntropy, FreshEntropy, MigrationBuffers,
 };
 use std::collections::HashMap;
 use std::vec::Vec;
@@ -33,7 +33,7 @@ const EPOCH: Epoch = Epoch::new(7);
 
 /// A minimal in-memory `SecureStorage`. The lifecycle's own unit tests use a logging
 /// double; here plain storage suffices — what is under test is what was stored.
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct TestStore {
     values: HashMap<([u8; 32], Slot), Vec<u8>>,
 }
@@ -104,7 +104,8 @@ impl Operator {
         spend_key: &[u8; 32],
     ) -> (AbsenceWitness<DEPTH>, AbsenceWitness<DEPTH>) {
         (
-            self.revocations.absence_witness(leaf.as_bytes()),
+            self.revocations
+                .absence_witness(&nymora_crypto::revocation_key(leaf)),
             self.spends.absence_witness(spend_key),
         )
     }
@@ -128,8 +129,11 @@ fn member_acting_at(
         agora,
         keys,
         store,
-        entropy(0x44),
-        entropy(0x22),
+        CredentialEntropy {
+            credential_key: entropy(0x44),
+            root_opening: entropy(0x22),
+            inbox_key: entropy(0x1b),
+        },
         &mut pk,
         &mut binding,
     )
@@ -338,7 +342,7 @@ fn revocation_and_spend_each_refuse_a_stored_credential() {
         .expect("stored material loads");
 
     // Revoked: fresh witnesses against the moved roots, and the proof refuses.
-    op.revocations.insert(*leaf.as_bytes());
+    op.revocations.insert(nymora_crypto::revocation_key(&leaf));
     let inclusion = op.leaf_witness(position);
     let (rev, spend) = op.absences(&leaf, &spend_key(&store, AGORA_A, &leaf));
     assert_eq!(
@@ -398,15 +402,22 @@ fn migration_proves_from_the_handoff_and_its_spend_locks_the_predecessor_out() {
     // Old device authorizes; the handoff crosses devices.
     let mut old_pk = [0u8; 64];
     let mut cert = [0u8; 128];
+    let mut retire = [0u8; 128];
     let mut handoff_bytes = [0u8; 512];
+    // Authorization destroys the old device's acting material (0036); the copy kept
+    // here is the escaped-material case the server-side window is measured against.
+    let mut old_device = old_store.clone();
     let len = authorize_migration(
         AGORA_A,
         &old_keys,
-        &old_store,
+        &mut old_device,
         successor_pk,
-        &mut old_pk,
-        &mut cert,
-        &mut handoff_bytes,
+        MigrationBuffers {
+            root_public_key: &mut old_pk,
+            signature: &mut cert,
+            retire_signature: &mut retire,
+            handoff: &mut handoff_bytes,
+        },
     )
     .expect("authorization succeeds");
     let handoff =
@@ -420,6 +431,7 @@ fn migration_proves_from_the_handoff_and_its_spend_locks_the_predecessor_out() {
         &handoff,
         successor_pk,
         entropy(0x23),
+        entropy(0x1c),
     )
     .expect("migration completes");
 
@@ -433,7 +445,9 @@ fn migration_proves_from_the_handoff_and_its_spend_locks_the_predecessor_out() {
     let successor_opening = RootOpening::new(stored_opening);
 
     let inclusion = op.leaf_witness(old_position);
-    let revocation_absence = op.revocations.absence_witness(old_leaf.as_bytes());
+    let revocation_absence = op
+        .revocations
+        .absence_witness(&nymora_crypto::revocation_key(&old_leaf));
     let witness = MigrationWitness {
         old_root_public_key: handoff.root_public_key,
         old_root_opening: &handoff.root_opening,

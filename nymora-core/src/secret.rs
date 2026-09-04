@@ -114,19 +114,33 @@ pub struct CredentialKey(SecretBytes<32>);
 #[derive(Debug, PartialEq, Eq)]
 pub struct TagKey(SecretBytes<32>);
 
-/// An agora's per-epoch witness-service key, `K_witness_e` (§5.2, proposal 0025).
+/// An agora's per-epoch fetch key, `K_fetch_e` (§11, proposal 0036).
 ///
 /// Symmetric and shared like [`TagKey`], with the same lifecycle: derived per epoch by the
-/// operator, distributed to current members in the boundary broadcast (§11), and withheld
-/// from a revoked member at exactly the tag key's cut. It gates the inclusion-witness
-/// service — the one member service that *cannot* be gated by a membership proof, because
-/// a member's first proof of an epoch requires the witness itself.
-///
-/// Like the tag key, it authenticates nothing about *who* asked — only that the requester
-/// held the epoch's key. A leaked key lets an outsider probe class occupancy for that
-/// epoch (the shared-secret blast radius of §15), never forge a proof.
+/// operator and delivered inside the encrypted bulletin body. Presenting it is what fetches
+/// the next boundary envelope. Its blast radius is stated in full: a leaked or retained
+/// key reveals that the agora exists and how many ciphertexts it published this epoch —
+/// and nothing behind them, which is all ciphertext (§15).
 #[derive(Debug, PartialEq, Eq)]
-pub struct WitnessKey(SecretBytes<32>);
+pub struct FetchKey(SecretBytes<32>);
+
+/// The per-epoch body key, `K_body_e` (§11, proposal 0036).
+///
+/// The shared bulletin body — roots, exclusion sets, tag key, fetch key — is encrypted
+/// **once** under this key for every member, and each member receives it inside their
+/// own ciphertext. That is the single-body rule: an operator cannot show one member
+/// different roots, because there is one body under one signed digest.
+#[derive(Debug, PartialEq, Eq)]
+pub struct BodyKey(SecretBytes<32>);
+
+/// A credential's inbox secret key — the X25519 secret half (§11, proposal 0036).
+///
+/// Generated fresh at credential creation alongside `sk_cred` and `r_root`, held in its
+/// own storage slot, wrapped where wrapping is in force (§9.2), and destroyed by planned
+/// migration on the old device (§9.3). Used for exactly one thing: opening this
+/// credential's boundary ciphertext. It signs nothing and proves nothing.
+#[derive(Debug, PartialEq, Eq)]
+pub struct InboxSecretKey(SecretBytes<32>);
 
 macro_rules! secret_newtype {
     ($($name:ident),+ $(,)?) => {
@@ -153,12 +167,17 @@ secret_newtype!(
     RootOpening,
     CredentialKey,
     TagKey,
-    WitnessKey
+    FetchKey,
+    BodyKey,
+    InboxSecretKey
 );
 
 #[cfg(test)]
 mod tests {
-    use super::{CredentialKey, EpochSecretKey, RootOpening, SecretBytes, TagKey, WitnessKey};
+    use super::{
+        BodyKey, CredentialKey, EpochSecretKey, FetchKey, InboxSecretKey, RootOpening, SecretBytes,
+        TagKey,
+    };
     use std::format;
 
     #[test]
@@ -181,7 +200,9 @@ mod tests {
             ("r_root", format!("{:?}", RootOpening::new([0xcd; 32]))),
             ("sk_cred", format!("{:?}", CredentialKey::new([0xcd; 32]))),
             ("K_tag_e", format!("{:?}", TagKey::new([0xcd; 32]))),
-            ("K_witness_e", format!("{:?}", WitnessKey::new([0xcd; 32]))),
+            ("K_fetch_e", format!("{:?}", FetchKey::new([0xcd; 32]))),
+            ("K_body_e", format!("{:?}", BodyKey::new([0xcd; 32]))),
+            ("sk_inbox", format!("{:?}", InboxSecretKey::new([0xcd; 32]))),
         ];
         for (name, output) in rendered {
             assert!(!output.contains("cd"), "{name} leaked into Debug output");

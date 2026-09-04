@@ -69,9 +69,51 @@ pub struct MigrationCertPayload<'a> {
     pub successor_public_key: &'a [u8],
 }
 
+/// What an inbox certificate instructs (§9.3, §11; proposal 0036).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InboxAction {
+    /// Stop encrypting to this inbox key: the planned-migration retirement, signed by the
+    /// old device and submitted by the successor at a time of its choosing (§9.3).
+    Retire,
+    /// (Re)register this inbox key and reset its horizon — the renewal that keeps a live
+    /// credential's ciphertext in the envelope (§11).
+    Renew,
+}
+
+impl InboxAction {
+    /// The value absorbed into the certificate message (the field-domain registry's
+    /// `inbox_action`), so one instruction cannot replay as the other.
+    #[must_use]
+    pub const fn tag(self) -> u64 {
+        match self {
+            Self::Retire => crate::domain::field_domain::inbox_action::RETIRE,
+            Self::Renew => crate::domain::field_domain::inbox_action::RENEW,
+        }
+    }
+}
+
+/// The payload an inbox certificate signs over (§9.3, §11; proposal 0036).
+///
+/// The root key's instruction about the credential's inbox key, verified inside the
+/// inbox statement against the key committed in the leaf — so only the leaf's owner can
+/// retire or renew its delivery address, and the operator, which already holds the
+/// inbox key against the leaf, learns nothing it did not have. The agora and the action
+/// are inside the compressed message; the leaf is bound by the statement, not the
+/// signature.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InboxCertPayload<'a> {
+    /// The agora the instruction applies within. See [`EpochCertPayload::agora`].
+    pub agora: AgoraId,
+    /// What the certificate instructs.
+    pub action: InboxAction,
+    /// The inbox public key the instruction names: the one to retire, or the one to
+    /// (re)register. 32 bytes, an X25519 point.
+    pub inbox_public_key: &'a [u8],
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{EpochCertPayload, MigrationCertPayload};
+    use super::{EpochCertPayload, InboxAction, InboxCertPayload, MigrationCertPayload};
     use crate::agora::AgoraId;
     use crate::epoch::Epoch;
 
@@ -92,5 +134,13 @@ mod tests {
             successor_public_key: &[0xdd; 32],
         };
         assert_eq!(migration.agora, epoch.agora);
+
+        let inbox = InboxCertPayload {
+            agora: AgoraId::from_bytes([0x7e; 32]),
+            action: InboxAction::Retire,
+            inbox_public_key: &[0xee; 32],
+        };
+        assert_eq!(inbox.agora, epoch.agora);
+        assert_ne!(InboxAction::Retire.tag(), InboxAction::Renew.tag());
     }
 }

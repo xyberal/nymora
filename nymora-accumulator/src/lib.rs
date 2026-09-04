@@ -43,7 +43,7 @@ pub use exclusion::ExclusionSet;
 pub use exclusion::{verifies_absent, AbsenceWitness, KEY_BITS};
 #[cfg(feature = "build")]
 pub use tree::Tree;
-pub use witness::{hash_node, root_from, verifies, Node, Witness};
+pub use witness::{empty_node, hash_node, root_from, verifies, Node, Witness};
 
 #[cfg(test)]
 extern crate std;

@@ -38,19 +38,21 @@
 //! redact themselves in `Debug` like the secrets they contain.
 
 use crate::statement::{
-    Action, ChainPublicInputs, ChainWitness, MigrationPublicInputs, MigrationWitness,
+    Action, ChainPublicInputs, ChainWitness, InboxPublicInputs, InboxWitness,
+    MigrationPublicInputs, MigrationWitness,
 };
 use crate::system::ProofSystem;
 use nymora_accumulator::{verifies, verifies_absent, AbsenceWitness, Witness};
 use nymora_core::{CredentialKey, EpochSecretKey, ProtocolError, RootOpening};
 use nymora_crypto::signature::{PUBLIC_KEY_LEN, SIGNATURE_LEN};
-use nymora_crypto::{commit, live_auth, nullifier, signature};
+use nymora_crypto::{commit, live_auth, nullifier, revocation_key, signature};
 use sha2::{Digest, Sha256};
 
 /// Local separators for the stub's public-input digests. Not protocol domain tags — see
 /// the module documentation on why the binding encoding stays local to this backend.
 const CHAIN_BINDING: &[u8] = b"stub-prover/v0/chain-binding";
 const MIGRATION_BINDING: &[u8] = b"stub-prover/v0/migration-binding";
+const INBOX_BINDING: &[u8] = b"stub-prover/v0/inbox-binding";
 
 /// Absorbs a length prefix before the bytes — the same convention as everywhere else, so
 /// no field boundary in the digest is movable.
@@ -119,6 +121,17 @@ fn migration_binding(public: &MigrationPublicInputs) -> [u8; 32] {
     hasher.finalize().into()
 }
 
+/// The digest of an inbox proof's full public inputs.
+fn inbox_binding(public: &InboxPublicInputs) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    framed(&mut hasher, INBOX_BINDING);
+    framed(&mut hasher, public.agora.as_bytes());
+    framed(&mut hasher, public.leaf.as_bytes());
+    framed(&mut hasher, public.inbox_public_key.as_bytes());
+    framed(&mut hasher, &public.action.tag().to_le_bytes());
+    hasher.finalize().into()
+}
+
 /// The stand-in backend: proves by checking, verifies by re-checking.
 ///
 /// Stateless — a real backend holds proving and verifying artifacts here, which is why
@@ -171,6 +184,21 @@ impl<const DEPTH: usize> core::fmt::Debug for MigrationStubProof<DEPTH> {
     }
 }
 
+/// A stub inbox proof. Same standing as [`StubProof`].
+pub struct InboxStubProof {
+    binding: [u8; 32],
+    root_public_key: [u8; PUBLIC_KEY_LEN],
+    root_opening: RootOpening,
+    credential_key: CredentialKey,
+    inbox_cert_signature: [u8; SIGNATURE_LEN],
+}
+
+impl core::fmt::Debug for InboxStubProof {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "InboxStubProof {{ <witness redacted> }}")
+    }
+}
+
 /// Evaluates every clause of §9.1's chain. The order matches the specification text; a
 /// short-circuit here is fine because the evaluator is not a proof — timing discipline
 /// belongs to the primitives it calls.
@@ -219,9 +247,10 @@ fn chain_holds<const DEPTH: usize>(
         return false;
     }
 
-    // The two currency clauses (§9.1): not revoked, not migrated away.
+    // The two currency clauses (§9.1): not revoked, not migrated away. The revocation
+    // entry is recomputed from the opened leaf (proposal 0036).
     if !verifies_absent(
-        leaf.as_bytes(),
+        &revocation_key(&leaf),
         witness.revocation_absence,
         &public.revocation_root,
     ) {
@@ -276,7 +305,7 @@ fn migration_holds<const DEPTH: usize>(
 
     // A revoked credential cannot migrate out from under its revocation (§11).
     if !verifies_absent(
-        old_leaf.as_bytes(),
+        &revocation_key(&old_leaf),
         witness.revocation_absence,
         &public.revocation_root,
     ) {
@@ -315,6 +344,32 @@ fn migration_holds<const DEPTH: usize>(
     ) == Some(public.successor_commitment)
 }
 
+/// Evaluates the inbox statement (§9.3, §11; proposal 0036): the secrets open the
+/// public leaf, and the committed root key signed exactly this instruction.
+fn inbox_holds(witness: &InboxWitness<'_>, public: &InboxPublicInputs) -> bool {
+    if commit(
+        witness.root_public_key,
+        witness.credential_key,
+        witness.root_opening,
+        &public.agora,
+    ) != Some(public.leaf)
+    {
+        return false;
+    }
+    let Some(message) = signature::inbox_cert_message(
+        &public.agora,
+        public.action,
+        public.inbox_public_key.as_bytes(),
+    ) else {
+        return false;
+    };
+    signature::verify(
+        witness.root_public_key,
+        &message,
+        witness.inbox_cert_signature,
+    )
+}
+
 /// Copies a scheme-width slice, or reports the caller's input unusable for this backend.
 fn sized<const N: usize>(bytes: &[u8]) -> Result<[u8; N], ProtocolError> {
     bytes.try_into().map_err(|_| ProtocolError::Malformed)
@@ -323,6 +378,7 @@ fn sized<const N: usize>(bytes: &[u8]) -> Result<[u8; N], ProtocolError> {
 impl<const DEPTH: usize> ProofSystem<DEPTH> for StubProver {
     type Proof = StubProof<DEPTH>;
     type MigrationProof = MigrationStubProof<DEPTH>;
+    type InboxProof = InboxStubProof;
 
     fn prove(
         &self,
@@ -413,22 +469,55 @@ impl<const DEPTH: usize> ProofSystem<DEPTH> for StubProver {
             public,
         )
     }
+
+    fn prove_inbox(
+        &self,
+        witness: &InboxWitness<'_>,
+        public: &InboxPublicInputs,
+    ) -> Result<Self::InboxProof, ProtocolError> {
+        if !inbox_holds(witness, public) {
+            return Err(ProtocolError::Malformed);
+        }
+        Ok(InboxStubProof {
+            binding: inbox_binding(public),
+            root_public_key: sized(witness.root_public_key)?,
+            root_opening: RootOpening::new(*witness.root_opening.expose()),
+            credential_key: CredentialKey::new(*witness.credential_key.expose()),
+            inbox_cert_signature: sized(witness.inbox_cert_signature)?,
+        })
+    }
+
+    fn verify_inbox(&self, proof: &Self::InboxProof, public: &InboxPublicInputs) -> bool {
+        if proof.binding != inbox_binding(public) {
+            return false;
+        }
+        inbox_holds(
+            &InboxWitness {
+                root_public_key: &proof.root_public_key,
+                root_opening: &proof.root_opening,
+                credential_key: &proof.credential_key,
+                inbox_cert_signature: &proof.inbox_cert_signature,
+            },
+            public,
+        )
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::StubProver;
     use crate::statement::{
-        Action, ChainPublicInputs, ChainWitness, MigrationPublicInputs, MigrationWitness,
+        Action, ChainPublicInputs, ChainWitness, InboxPublicInputs, InboxWitness,
+        MigrationPublicInputs, MigrationWitness,
     };
     use crate::system::ProofSystem;
     use nymora_accumulator::{AbsenceWitness, ExclusionSet, Tree, Witness};
     use nymora_core::{
-        AgoraId, Commitment, CredentialKey, Epoch, EpochSecretKey, MessageHash, ProtocolError,
-        Root, RootOpening, SessionContext,
+        AgoraId, Commitment, CredentialKey, Epoch, EpochSecretKey, InboxAction, InboxPublicKey,
+        MessageHash, ProtocolError, Root, RootOpening, SessionContext,
     };
     use nymora_crypto::signature::{PUBLIC_KEY_LEN, SIGNATURE_LEN};
-    use nymora_crypto::{commit, live_auth, nullifier, signature};
+    use nymora_crypto::{commit, live_auth, nullifier, revocation_key, signature};
 
     const DEPTH: usize = 2;
     const AGORA_A: AgoraId = AgoraId::from_bytes([0x01; 32]);
@@ -504,7 +593,7 @@ mod tests {
             root_public_key,
             leaf,
             leaf_witness,
-            revocation_absence: revocations.absence_witness(leaf.as_bytes()),
+            revocation_absence: revocations.absence_witness(&revocation_key(&leaf)),
             spend_absence: spends.absence_witness(spend.as_bytes()),
             class_root: tree.root(),
             revocation_root: revocations.root(),
@@ -614,7 +703,7 @@ mod tests {
                 &AGORA_A,
             )
             .expect("the root key is a subgroup point");
-            revocations.insert(*leaf.as_bytes());
+            revocations.insert(revocation_key(&leaf));
         });
         assert_eq!(
             StubProver
@@ -622,6 +711,85 @@ mod tests {
                 .err(),
             Some(ProtocolError::Malformed)
         );
+    }
+
+    /// The set holds `Poseidon(REVOKE, leaf)`, not the leaf (proposal 0036): inserting
+    /// the raw leaf revokes nothing.
+    #[test]
+    fn a_raw_leaf_in_the_revocation_set_revokes_nothing() {
+        let fixture = fixture_with(|revocations, _| {
+            let leaf = commit(
+                &signature::public_key(&ROOT_SEED).expect("canonical seed"),
+                &CredentialKey::new([0x0b; 32]),
+                &RootOpening::new([0x0c; 32]),
+                &AGORA_A,
+            )
+            .expect("the root key is a subgroup point");
+            revocations.insert(*leaf.as_bytes());
+        });
+        assert!(StubProver
+            .prove(&fixture.witness(), &fixture.publics(fixture.authorship()))
+            .is_ok());
+    }
+
+    /// The inbox statement (proposal 0036): the leaf's root key instructs, and every
+    /// rebinding — another action, another key, another leaf, a forged signature — fails.
+    #[test]
+    fn an_inbox_certificate_proves_and_binds_every_input() {
+        let fixture = fixture();
+        let inbox = InboxPublicKey::from_bytes([0x1b; 32]);
+        let message =
+            signature::inbox_cert_message(&AGORA_A, InboxAction::Retire, inbox.as_bytes())
+                .expect("32 bytes");
+        let inbox_cert_signature = signature::sign(&ROOT_SEED, &message).expect("canonical seed");
+        let witness = InboxWitness {
+            root_public_key: &fixture.root_public_key,
+            root_opening: &fixture.root_opening,
+            credential_key: &fixture.credential_key,
+            inbox_cert_signature: &inbox_cert_signature,
+        };
+        let public = InboxPublicInputs {
+            agora: AGORA_A,
+            leaf: fixture.leaf,
+            inbox_public_key: inbox,
+            action: InboxAction::Retire,
+        };
+        // The inbox statement carries no depth; the trait's parameter is named explicitly.
+        let prover = &StubProver;
+        let proof = ProofSystem::<DEPTH>::prove_inbox(prover, &witness, &public)
+            .expect("a satisfied statement must prove");
+        assert!(ProofSystem::<DEPTH>::verify_inbox(prover, &proof, &public));
+
+        let as_renew = InboxPublicInputs {
+            action: InboxAction::Renew,
+            ..public
+        };
+        assert!(ProofSystem::<DEPTH>::prove_inbox(prover, &witness, &as_renew).is_err());
+        assert!(!ProofSystem::<DEPTH>::verify_inbox(
+            prover, &proof, &as_renew
+        ));
+
+        let other_key = InboxPublicInputs {
+            inbox_public_key: InboxPublicKey::from_bytes([0x1c; 32]),
+            ..public
+        };
+        assert!(!ProofSystem::<DEPTH>::verify_inbox(
+            prover, &proof, &other_key
+        ));
+
+        let other_leaf = InboxPublicInputs {
+            leaf: Commitment::from_bytes([0x77; 32]),
+            ..public
+        };
+        assert!(ProofSystem::<DEPTH>::prove_inbox(prover, &witness, &other_leaf).is_err());
+
+        let mut forged = inbox_cert_signature;
+        forged[40] ^= 1;
+        let forged_witness = InboxWitness {
+            inbox_cert_signature: &forged,
+            ..witness
+        };
+        assert!(ProofSystem::<DEPTH>::prove_inbox(prover, &forged_witness, &public).is_err());
     }
 
     /// The second currency clause: a spent (migrated-away) leaf is no longer current.

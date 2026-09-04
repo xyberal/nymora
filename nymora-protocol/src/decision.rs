@@ -59,6 +59,13 @@ pub enum Decision {
     },
     /// Freeze the agora permanently (§12).
     Dissolution,
+    /// Set how many boundaries an inbox registration lasts before it must be renewed
+    /// (§11, proposal 0036). A per-agora policy value: it prices a member's exposure
+    /// against the operator's envelope size, and that is the agora's trade to make.
+    InboxHorizon {
+        /// The horizon, in boundaries. At least `MIN_INBOX_HORIZON`.
+        boundaries: u64,
+    },
 }
 
 impl Decision {
@@ -68,6 +75,7 @@ impl Decision {
             Self::Policy { .. } => Domain::ProposalPolicy,
             Self::Revocation { .. } => Domain::ProposalRevocation,
             Self::Dissolution => Domain::ProposalDissolution,
+            Self::InboxHorizon { .. } => Domain::ProposalHorizon,
         }
     }
 
@@ -88,6 +96,7 @@ impl Decision {
                 .absorb(&governance_quorum.to_le_bytes()),
             Self::Revocation { leaf } => hasher.absorb(leaf.as_bytes()),
             Self::Dissolution => hasher,
+            Self::InboxHorizon { boundaries } => hasher.absorb(&boundaries.to_le_bytes()),
         }
     }
 }

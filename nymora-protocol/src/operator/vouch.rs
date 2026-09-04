@@ -21,22 +21,33 @@ use super::{Admission, AgoraState, ClassState, Recorded, SessionId, VouchSession
 use crate::credential::FreshEntropy;
 use alloc::collections::BTreeSet;
 use nymora_circuits::ProofSystem;
-use nymora_core::{Commitment, LocalReason, PolicyClass, ProtocolError, Rejection};
+use nymora_core::{Commitment, InboxPublicKey, LocalReason, PolicyClass, ProtocolError, Rejection};
 use nymora_proofs::verify_vouch;
 
 impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
-    /// Accepts a candidate's commitment as pending admission (§5.3's `credentials/init`).
+    /// Accepts a candidate's commitment and inbox key as pending admission (§5.3's
+    /// `credentials/init`; proposal 0036).
     ///
     /// Idempotent, and the acknowledgement is identical whether the commitment was new,
     /// already pending, or already a member — anything else would make this call a
-    /// membership oracle for whoever can reach it.
+    /// membership oracle for whoever can reach it. A repeated call replaces the pending
+    /// inbox key: the candidate's own device is the only party that can reach this with
+    /// its leaf, and the leaf is not yet a member.
     ///
     /// # Errors
     ///
     /// [`ProtocolError::Rejected`] only on a dissolved agora.
-    pub fn credentials_init(&mut self, commitment: Commitment) -> Result<Recorded, ProtocolError> {
+    pub fn credentials_init(
+        &mut self,
+        commitment: Commitment,
+        inbox: InboxPublicKey,
+    ) -> Result<Recorded, ProtocolError> {
         self.live()?;
         self.pending.insert(commitment);
+        // The delivery address travels with the leaf (proposal 0036) and lands with it:
+        // the boundary that places the leaf registers the inbox, so the credential's
+        // first envelope already carries its ciphertext.
+        self.staged_inboxes.insert(commitment, inbox);
         Ok(Recorded)
     }
 
@@ -196,10 +207,10 @@ impl<S: ProofSystem<DEPTH>, const DEPTH: usize> AgoraState<S, DEPTH> {
             .iter()
             .filter(|(c, _)| *c == class)
             .count() as u64;
-        let position = state.occupied + staged_before;
+        let position = ClassState::<DEPTH>::position_of(state.occupied + staged_before);
         self.staged.admissions.push((class, leaf));
         let active_from = self.epoch.next().ok_or(Rejection::opaque())?;
-        debug_assert!(position < ClassState::<DEPTH>::CAPACITY);
+        debug_assert!(position < 2 * ClassState::<DEPTH>::CAPACITY || DEPTH == 0);
         Ok(Admission {
             active_from,
             position,

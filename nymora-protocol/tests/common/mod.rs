@@ -7,17 +7,21 @@
 
 #![allow(dead_code)]
 
-use nymora_accumulator::ExclusionSet;
+use nymora_accumulator::{verifies, ExclusionSet, Node, Witness};
 use nymora_circuits::{ChainWitness, ProofSystem, StubProver};
 use nymora_core::{
-    AgoraId, Commitment, Epoch, Nullifier, PolicyClass, ProtocolError, TagKey, WitnessKey,
+    AgoraId, Commitment, Epoch, FetchKey, InboxPublicKey, Nullifier, PolicyClass, ProtocolError,
+    TagKey,
 };
-use nymora_crypto::nullifier;
 use nymora_crypto::signature::PUBLIC_KEY_LEN;
+use nymora_crypto::{nullifier, revocation_key};
 use nymora_ports::{SecureStorage, Slot, SoftwareKeyStore};
 use nymora_proofs::{prove_policy_approval, prove_vouch, EpochRoots};
-use nymora_protocol::operator::{AgoraState, Bulletin, ClassPolicy, Founding, SessionId};
-use nymora_protocol::{create, load_acting_material, subject_id, FreshEntropy, SubjectId};
+use nymora_protocol::operator::{AgoraState, ClassPolicy, Envelope, Founding, SessionId};
+use nymora_protocol::{
+    accept_envelope, create, load_acting_material, load_inbox_secret, open_own_ciphertext,
+    own_lookup_tag, subject_id, BodyView, CredentialEntropy, FreshEntropy, SubjectId,
+};
 use std::collections::HashMap;
 use std::vec::Vec;
 
@@ -27,10 +31,19 @@ pub fn entropy(byte: u8) -> FreshEntropy {
     FreshEntropy::new([byte; 32])
 }
 
-/// A minimal in-memory `SecureStorage`.
-#[derive(Default)]
+/// A minimal in-memory `SecureStorage`. `Clone` so a test can keep a copy of an old
+/// device's material after migration destroyed the original — the §15 extracted-key
+/// case, which is what the server-side migration window is measured against.
+#[derive(Default, Clone)]
 pub struct TestStore {
     values: HashMap<([u8; 32], Slot), Vec<u8>>,
+}
+
+impl TestStore {
+    /// Whether a slot is populated.
+    pub fn holds(&self, agora: AgoraId, slot: Slot) -> bool {
+        self.values.contains_key(&(*agora.as_bytes(), slot))
+    }
 }
 
 impl SecureStorage for TestStore {
@@ -66,9 +79,9 @@ impl SecureStorage for TestStore {
 pub const DEPTH: usize = 4;
 
 /// A member of one agora: stored credential material plus the local copies a Persora
-/// keeps — the exclusion sets rebuilt from bulletins, the tag keys received from
-/// broadcasts. `D` is the agora's accumulator depth, which the member's own set copies
-/// share.
+/// keeps — the exclusion sets rebuilt from envelopes, the tag keys received from
+/// broadcasts, the inclusion path delivered in the member's own ciphertext. `D` is the
+/// agora's accumulator depth, which the member's own set copies share.
 pub struct Member<const D: usize> {
     pub seed: u8,
     pub agora: AgoraId,
@@ -76,19 +89,23 @@ pub struct Member<const D: usize> {
     pub keys: SoftwareKeyStore,
     pub store: TestStore,
     pub leaf: Commitment,
+    /// The inbox key registered with the leaf (proposal 0036).
+    pub inbox: InboxPublicKey,
     pub position: u64,
     pub revocations: ExclusionSet<D>,
     pub spends: ExclusionSet<D>,
     pub tag_keys: Vec<(Epoch, TagKey)>,
-    /// The epoch's roots, as the bulletin delivered them (proposal 0025) — a member
-    /// holds no other source for them.
+    /// The epoch's roots, as the envelope's body delivered them — a member holds no other
+    /// source for them.
     pub roots: Option<EpochRoots>,
-    /// The epoch's witness-service key, from the same bulletin (proposal 0025).
-    pub witness_key: Option<WitnessKey>,
-    /// The operator statement key, pinned at admission (proposal 0024) — every bulletin
+    /// The epoch's inclusion path, from the member's own ciphertext (proposal 0036).
+    pub path: Option<Witness<D>>,
+    /// The epoch's fetch key, from the body — what fetches the next envelope.
+    pub fetch_key: Option<FetchKey>,
+    /// The operator statement key, pinned at admission (proposal 0024) — every envelope
     /// is verified against it before anything is applied.
     pub statement_key: Option<[u8; PUBLIC_KEY_LEN]>,
-    /// The last accepted bulletin's epoch — the monotonicity cursor (proposal 0024).
+    /// The last accepted envelope's epoch — the monotonicity cursor (proposal 0024).
     pub epoch: Option<Epoch>,
 }
 
@@ -106,8 +123,11 @@ impl<const D: usize> Member<D> {
             agora,
             &keys,
             &mut store,
-            entropy(seed ^ 0x44),
-            entropy(seed ^ 0x22),
+            CredentialEntropy {
+                credential_key: entropy(seed ^ 0x44),
+                root_opening: entropy(seed ^ 0x22),
+                inbox_key: entropy(seed ^ 0x1b),
+            },
             &mut pk,
             &mut binding,
         )
@@ -119,12 +139,14 @@ impl<const D: usize> Member<D> {
             keys,
             store,
             leaf: made.commitment,
+            inbox: made.inbox,
             position: u64::MAX,
             revocations: ExclusionSet::new(),
             spends: ExclusionSet::new(),
             tag_keys: Vec::new(),
             roots: None,
-            witness_key: None,
+            path: None,
+            fetch_key: None,
             statement_key: None,
             epoch: None,
         };
@@ -147,51 +169,86 @@ impl<const D: usize> Member<D> {
         .expect("rollover succeeds");
     }
 
-    /// What the host does with a boundary broadcast (§11): replace local set copies with
-    /// the whole sets the bulletin carries, cache the roots and both epoch keys, roll the
-    /// credential. The bulletin is a member's only source for current roots and the
-    /// witness key (proposal 0025).
-    pub fn apply_bulletin(&mut self, bulletin: &Bulletin) {
+    /// What the host does with a boundary envelope (§11, proposal 0036): verify the
+    /// statement, find and open this member's own ciphertext, open the body with the key
+    /// it carried, replace local set copies with the whole sets, cache the roots, the
+    /// path (checked against the body's root), and both epoch keys, roll the credential.
+    ///
+    /// `Err(Unavailable)` when the envelope carries no ciphertext for this member — the
+    /// delivery cut, observed.
+    pub fn receive(&mut self, envelope: &Envelope) -> Result<(), ProtocolError> {
         // Proposal 0024: nothing is applied before the statement verifies — signature
         // under the pinned key, over the member's own agora, strictly advancing.
-        nymora_protocol::accept_bulletin(
+        accept_envelope(
             self.statement_key.as_ref().expect("statement key pinned"),
-            &bulletin.statement(self.agora),
-            &bulletin.signature,
+            &envelope.statement(self.agora),
+            &envelope.signature,
             self.epoch,
-        )
-        .expect("the bulletin is a valid signed statement");
-        self.epoch = Some(bulletin.epoch);
+        )?;
+        let secret = load_inbox_secret(self.agora, &self.store)?;
+        let tag = own_lookup_tag(&secret, &envelope.ephemeral_key, &self.class)
+            .ok_or(ProtocolError::Malformed)?;
+        let ciphertext = envelope
+            .ciphertext(&tag)
+            .ok_or(ProtocolError::Unavailable)?;
+        let mut sealed = ciphertext.bytes.clone();
+        let own = open_own_ciphertext(
+            &secret,
+            &envelope.ephemeral_key,
+            &self.agora,
+            envelope.epoch,
+            &self.class,
+            &mut sealed,
+        )?;
+        let prefix: Vec<Node> = own
+            .path
+            .chunks_exact(32)
+            .map(|chunk| Node::from_bytes(chunk.try_into().expect("32 bytes")))
+            .collect();
+        let path =
+            Witness::<D>::from_prefix(own.position, &prefix).ok_or(ProtocolError::Malformed)?;
+        let mut body = envelope.body.clone();
+        let view = BodyView::open(&own.body_key, &self.agora, envelope.epoch, &mut body)?;
+
+        let class_root = view
+            .class_root(self.class)
+            .expect("the body carries this member's class");
+        // The member's half of the single-body rule: the delivered path reproduces the
+        // body's root for this leaf, or nothing is applied.
+        assert!(
+            verifies(&self.leaf, &path, &class_root),
+            "the delivered path does not reproduce the body's class root"
+        );
+
+        self.epoch = Some(envelope.epoch);
+        self.position = own.position;
         self.revocations = ExclusionSet::new();
-        for key in &bulletin.revoked {
-            self.revocations.insert(*key);
+        for key in view.revoked() {
+            self.revocations.insert(key);
         }
         self.spends = ExclusionSet::new();
-        for key in &bulletin.spent {
-            self.spends.insert(*key);
+        for key in view.spent() {
+            self.spends.insert(key);
         }
-        let class_root = bulletin
-            .class_roots
-            .iter()
-            .find(|(class, _)| *class == self.class)
-            .map(|(_, root)| *root)
-            .expect("the bulletin carries this member's class");
         self.roots = Some(EpochRoots {
             class: class_root,
-            revocation: bulletin.revocation_root,
-            spend: bulletin.spend_root,
+            revocation: view.revocation_root(),
+            spend: view.spend_root(),
         });
-        self.witness_key = Some(WitnessKey::new(*bulletin.witness_key.expose()));
-        nymora_protocol::store_tag_key(
-            self.agora,
-            &mut self.store,
-            bulletin.epoch,
-            &bulletin.tag_key,
-        )
-        .expect("tag key stores");
+        self.path = Some(path);
+        self.fetch_key = Some(FetchKey::new(*view.fetch_key().expose()));
+        nymora_protocol::store_tag_key(self.agora, &mut self.store, envelope.epoch, view.tag_key())
+            .expect("tag key stores");
         self.tag_keys
-            .push((bulletin.epoch, TagKey::new(*bulletin.tag_key.expose())));
-        self.roll(bulletin.epoch);
+            .push((envelope.epoch, TagKey::new(*view.tag_key().expose())));
+        self.roll(envelope.epoch);
+        Ok(())
+    }
+
+    /// [`receive`](Self::receive), for a member the envelope must carry.
+    pub fn apply_envelope(&mut self, envelope: &Envelope) {
+        self.receive(envelope)
+            .expect("the envelope is a valid signed statement carrying this member");
     }
 
     /// The spend key whose absence this member's routine proofs show (§9.1).
@@ -205,20 +262,19 @@ impl<const D: usize> Member<D> {
         *nullifier::migration(&key, &self.leaf, &self.agora).as_bytes()
     }
 
-    /// Assembles the full chain witness from stored material plus operator-served
-    /// inclusion, and hands it to `f` — the closure keeps the borrows honest.
+    /// Assembles the full chain witness from stored material plus the envelope-delivered
+    /// inclusion path, and hands it to `f` — the closure keeps the borrows honest.
     pub fn acting<R>(
         &self,
         op: &AgoraState<StubProver, D>,
         f: impl FnOnce(&ChainWitness<'_, D>, Epoch, &EpochRoots) -> R,
     ) -> R {
         let epoch = op.current_epoch();
-        let roots = *self.roots.as_ref().expect("equipped by a bulletin");
-        let key = self.witness_key.as_ref().expect("equipped by a bulletin");
-        let inclusion = op
-            .witness(key, self.class, self.position)
-            .expect("leaf landed");
-        let revocation = self.revocations.absence_witness(self.leaf.as_bytes());
+        let roots = *self.roots.as_ref().expect("equipped by an envelope");
+        let inclusion = *self.path.as_ref().expect("equipped by an envelope");
+        let revocation = self
+            .revocations
+            .absence_witness(&revocation_key(&self.leaf));
         let spend = self.spends.absence_witness(&self.spend_key());
         let mut pk_buf = [0u8; 64];
         let mut record_buf = [0u8; 256];
@@ -300,19 +356,19 @@ pub fn found<const D: usize>(
                 },
             )],
             founder_classes: &[founder.class],
+            founder_inbox: founder.inbox,
         },
         entropy(tag_seed),
         entropy(tag_seed ^ 0x5c),
         log_seed.map(entropy),
     )
     .expect("founding succeeds");
-    founder.position = 0;
     // The founder pins the statement key as part of founding (proposal 0024), then —
-    // genesis having no boundary — is equipped by the current bulletin, the same
-    // members-only channel every later epoch uses (proposal 0025).
+    // genesis having no boundary — is equipped by the current envelope, the same
+    // members-only channel every later epoch uses.
     founder.statement_key = Some(op.statement_key());
-    let bulletin = op.current_bulletin().expect("agora is live");
-    founder.apply_bulletin(&bulletin);
+    let envelope = op.current_envelope().expect("agora is live");
+    founder.apply_envelope(&envelope);
     op
 }
 
@@ -323,7 +379,8 @@ pub fn admit<const D: usize>(
     vouchers: &[&Member<D>],
     id_seed: u8,
 ) {
-    op.credentials_init(candidate.leaf).expect("init records");
+    op.credentials_init(candidate.leaf, candidate.inbox)
+        .expect("init records");
     // The statement key travels in the host's admission package (proposal 0024).
     candidate.statement_key = Some(op.statement_key());
     let session = op
@@ -337,11 +394,10 @@ pub fn admit<const D: usize>(
     candidate.position = admission.position;
 }
 
-/// Advances the boundary and delivers the bulletin to `members` — and, pointedly, to
-/// nobody else.
+/// Advances the boundary and delivers the envelope to `members`.
 pub fn advance<const D: usize>(op: &mut AgoraState<StubProver, D>, members: &mut [&mut Member<D>]) {
-    let bulletin = op.advance_epoch().expect("boundary advances");
+    let envelope = op.advance_epoch().expect("boundary advances");
     for member in members {
-        member.apply_bulletin(&bulletin);
+        member.apply_envelope(&envelope);
     }
 }

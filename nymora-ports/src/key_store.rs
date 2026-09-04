@@ -21,7 +21,7 @@
 //! evidence live entirely inside an implementation, carried here only as bytes this crate
 //! never parses.
 
-pub use nymora_core::{EpochCertPayload, MigrationCertPayload};
+pub use nymora_core::{EpochCertPayload, InboxAction, InboxCertPayload, MigrationCertPayload};
 
 use nymora_core::{AgoraId, ProtocolError};
 
@@ -166,6 +166,23 @@ pub trait KeyStore {
     fn sign_migration(
         &self,
         payload: &MigrationCertPayload<'_>,
+        signature: &mut [u8],
+    ) -> Result<usize, ProtocolError>;
+
+    /// Signs an inbox certificate: the root key's instruction to retire or (re)register
+    /// the credential's inbox key (§9.3, §11; proposal 0036).
+    ///
+    /// The signed message is exactly the payload's canonical compressed message — see the
+    /// trait documentation. Returns the number of bytes written to `signature`. Behind a
+    /// user-presence check where the backend has one (§9.2): retirement and renewal are
+    /// each a rare, deliberate act.
+    ///
+    /// # Errors
+    ///
+    /// See the trait documentation.
+    fn sign_inbox_cert(
+        &self,
+        payload: &InboxCertPayload<'_>,
         signature: &mut [u8],
     ) -> Result<usize, ProtocolError>;
 }

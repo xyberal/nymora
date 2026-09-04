@@ -6,6 +6,35 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- **The boundary broadcast is delivered per member; the witness service is retired**
+  (§4.1, §5.2, §5.3, §6.5, §9.1, §9.2, §9.3, §11, §15, §16.4; proposal 0036, applied;
+  0025's witness-service half superseded, 0024's signature scope amended). Two findings
+  drove it: a keyed witness service was a membership list in disguise (every path's
+  level-0 sibling is the neighbouring leaf, so a shared-key holder could walk the
+  positions and rebuild the class, ordered and counted), and a shared-key bulletin gate
+  could not cut a revoked member's reads (the bulletin fetched with the old key carried
+  the next). Now each credential registers an X25519 **inbox key** with its leaf, and
+  the boundary produces one **envelope**: the shared body (roots, sets, `K_tag`,
+  `K_fetch`) encrypted **once** under a per-epoch body key, plus one ciphertext per
+  live credential carrying that key and the member's own inclusion path, all under
+  the statement key's signature — the single-body rule keeps per-member delivery from
+  becoming per-member forking. A revoked leaf's ciphertext is simply not produced, so
+  §11's delivery cut is literal; the witness service and `K_witness` are gone; a
+  member's path arrives sealed instead of fetched by position, which retires §15's
+  position-correlation residual. Leaves occupy even positions (the one neighbour a
+  path still shows is `Poseidon(leaf, 0)`), and the revocation set holds
+  `Poseidon(REVOKE, leaf)` — one new Poseidon in the absence clause, so the circuit
+  instances re-pin. A third statement, the **inbox statement**, verifies a root-signed
+  instruction over the inbox key: *retire* (signed at migration, carried in the
+  handoff, submitted by the successor at a time of its choosing) or *renew*
+  (registrations lapse at a per-agora **horizon**, a new quorum decision with a floor
+  of 7). Planned migration is atomic with key destruction on the old device. New
+  primitives in the pinned set: X25519 and ChaCha20-Poly1305 (`nymora-crypto`,
+  `no_std`). New conformance vectors: the fetch key, the revocation entry, the inbox
+  certificate message. Wire changes: `credentials/init`, founding, and `migrate` carry
+  the inbox key; the handoff format is version 2 (retirement certificate); the bulletin
+  is the envelope. The envelope grows with live credentials (~5 MB/epoch at ten
+  thousand) — §16.4 states the ceiling and the whole-download rule.
 - **The derivations cross into the field, and the provisional primitives retire**
   (§5.2, §6.5, §9.1, §9.3, §15; proposal 0035, applied). The last cryptographic
   stand-ins are gone: the algebraic family is the pinned Poseidon instance

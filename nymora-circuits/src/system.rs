@@ -8,10 +8,13 @@
 //! stand-in implementation; the real circuit replaces it behind the same trait, and
 //! nothing above recompiles differently.
 
-use crate::statement::{ChainPublicInputs, ChainWitness, MigrationPublicInputs, MigrationWitness};
+use crate::statement::{
+    ChainPublicInputs, ChainWitness, InboxPublicInputs, InboxWitness, MigrationPublicInputs,
+    MigrationWitness,
+};
 use nymora_core::ProtocolError;
 
-/// A proving system for the two Nymora statements.
+/// A proving system for the three Nymora statements.
 ///
 /// `DEPTH` is the accumulator depth the statements quantify over. The network-wide value
 /// is [`PROTOCOL_DEPTH`](crate::PROTOCOL_DEPTH) — a per-agora depth would be a per-agora
@@ -45,6 +48,8 @@ pub trait ProofSystem<const DEPTH: usize> {
     type Proof: core::fmt::Debug;
     /// A migration proof (§9.3).
     type MigrationProof: core::fmt::Debug;
+    /// An inbox proof (§9.3, §11; proposal 0036).
+    type InboxProof: core::fmt::Debug;
 
     /// Proves the membership chain with the action clause in `public`.
     ///
@@ -80,4 +85,20 @@ pub trait ProofSystem<const DEPTH: usize> {
         proof: &Self::MigrationProof,
         public: &MigrationPublicInputs,
     ) -> bool;
+
+    /// Proves the inbox statement: the leaf's committed root key issued this
+    /// instruction about this inbox key.
+    ///
+    /// # Errors
+    ///
+    /// [`ProtocolError::Malformed`] when the witness does not satisfy the statement
+    /// against these public inputs — see the trait documentation.
+    fn prove_inbox(
+        &self,
+        witness: &InboxWitness<'_>,
+        public: &InboxPublicInputs,
+    ) -> Result<Self::InboxProof, ProtocolError>;
+
+    /// Whether `proof` establishes the inbox statement for exactly these public inputs.
+    fn verify_inbox(&self, proof: &Self::InboxProof, public: &InboxPublicInputs) -> bool;
 }

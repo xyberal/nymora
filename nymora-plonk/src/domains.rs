@@ -14,7 +14,8 @@
 //! collide with without producing a specific curve point's coordinate as a constant.
 
 pub use nymora_core::field_domain::{
-    action_tag, ACTION, EPOCH_CERT, GAP, LEAF, MIGRATION_CERT, NONCE, SPEND,
+    action_tag, inbox_action, ACTION, EPOCH_CERT, GAP, INBOX_CERT, LEAF, MIGRATION_CERT, NONCE,
+    REVOKE, SPEND,
 };
 
 use crate::F;
