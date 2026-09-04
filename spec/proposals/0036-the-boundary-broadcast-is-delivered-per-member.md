@@ -1,7 +1,7 @@
 # Proposal 0036 — The boundary broadcast is delivered per member
 
 **Status:** **Proposed** — the spec text it affects remains authoritative
-**Affects:** §4.1, §5.2, §5.3, §9.1, §9.2, §9.3, §11, §15, §16.4
+**Affects:** §4.1, §5.2, §5.3, §6.5, §9.1, §9.2, §9.3, §11, §15, §16.4
 **Supersedes:** the witness-service half of [proposal 0025](0025-the-witness-service-is-keyed-not-proof-gated.md)
 (its roots half — no lookup endpoint for current roots — stands unchanged)
 **Amends:** [proposal 0024](0024-the-bulletin-is-a-signed-operator-statement.md) (the signature's scope)
@@ -94,6 +94,7 @@ envelope = {
   signature                             -- statement key over every field above
 }
 body   = { class_roots, revocation_root, spend_root, revoked[], spent[], K_tag_e, K_fetch_{e+1} }
+         -- revoked[] holds Poseidon(REVOKE, leaf), never a leaf (below)
 ct_i   = AEAD_{HKDF(DH(ephemeral_sk, inbox_pk_i))}( K_body_e ‖ path_i )
 path_i = the siblings of leaf i below the tree's occupied height (the rest are constant)
 ```
@@ -177,15 +178,35 @@ nothing seen in vouching, `credentials/init`, the revocation set, or migration. 
 placement rule in §5.2, no circuit change, no fold change; capacity halves to 2³¹ per
 class, still past any class the network will host (0032's argument holds at half).
 
+### The revocation set holds hashed entries
+
+With paths delivered privately and neighbours hashed, the body was the last surface that
+carried raw leaves: the revocation set travels whole (§11). It now holds
+`Poseidon(REVOKE, leaf)` — `REVOKE` a new constant in the field-domain registry (§9.1),
+domain first like every other derivation — and the routine proof's absence clause proves
+the absence of that value rather than of the leaf. The revocation *proposal* still names
+the leaf (§11's quorum sees what it revokes); the operator hashes at execution.
+
+Stated exactly, because the change is smaller than it looks: revocation must be
+computable by the operator from the leaf alone — the revoked member does not cooperate —
+and the absence witness computable by the member from their own material, so the entry
+has to be a *public* function of the leaf. Anyone who already knows a leaf can compute its
+entry and test the set; the vouchers of a revoked member learn what §11's quorum learned
+anyway. What the hashing buys is that **no broadcast carries a leaf**, and that a set
+entry cannot be linked to a path's neighbour value `Poseidon(neighbour_leaf, 0)`, so the
+two values a member can still see cross-reference with nothing and with each other not
+at all. The cost is one Poseidon in the absence clause — a change to the pinned
+instances (§6.5, 0034), which this proposal otherwise avoided.
+
 ### Expiry and renewal
 
 Ciphertexts accumulate per lifetime credential, not per live member — exactly as
 accumulator capacity does ("consumption tracks device churn rather than recruitment",
 §5.2) — and a consumed leaf's inbox key cannot be retired by the operator, because
 migration is anonymous (§9.3: the spend nullifier does not name the consumed leaf). So an
-inbox registration is valid for a **horizon** of boundaries (a year of daily epochs by
-default; an operator parameter with a specified minimum), after which the operator stops
-encrypting to it unless renewed. Renewal is a member action: the routine proof chain,
+inbox registration is valid for a **horizon** of boundaries — a per-agora policy value set
+through §4.3's machine (default 365, protocol floor 7, so a horizon can never fall inside
+the catch-up window), after which the operator stops encrypting to it unless renewed. Renewal is a member action: the routine proof chain,
 challenge-bound like §7's access proof and carrying no nullifier, naming the inbox key
 (same or fresh) whose horizon resets. Consumed leaves never renew, so their ciphertexts
 fall away without the operator learning which leaf was consumed. The cost is a coarse
@@ -207,8 +228,10 @@ an old device that keeps decrypting bulletins until it is wiped. Closed in this 
 2. **Delayed retirement, opt-in.** The old device may also sign
    `retire_cert = Sign(sk_root_old, {inbox_pk_old, agora_id})` for the new device to submit
    at any later time, under a proof that the signature verifies against the key committed
-   in the consumed leaf — the migration circuit's certificate clause under a new message
-   domain, not a new statement. The operator drops the key at the next bulletin: no
+   in the consumed leaf — the migration circuit's certificate clause reused under a new
+   message domain (`RETIRE_CERT`, field-domain registry); whether it lands as a
+   message-domain switch on the migration instance or as its own pinned instance is
+   settled at apply time (§6.5). The operator drops the key at the next bulletin: no
    boundary, no quorum, no revocation-set entry. The price is migration's anonymity,
    partially: the operator learns which spent leaf belonged to *some* migration, so
    predecessor and successor become linkable within the batch of migrations in the same
@@ -295,13 +318,14 @@ over Tor. The whole-download is the privacy-preserving mode: fetching only one's
 ciphertext by index presents the position per epoch — the correlation this proposal
 otherwise removes — so it is a documented downgrade a large agora may choose over an
 unlinkable transport, not a default (§16.4 gains the ceiling). Two primitives join the
-pinned set. Operator work per boundary is `O(N)`, seconds at a million. One coarse
+pinned set, and the absence clause changes, so the circuit instances re-pin (0034) and the
+algebraic vectors regenerate. Operator work per boundary is `O(N)`, seconds at a million. One coarse
 activity signal per horizon replaces one per epoch. Class capacity halves to 2³¹.
 
 **Unchanged.** What a witness *is* and when it is valid (0020); the current roots' absence
 of any lookup endpoint (0025's roots half); §7's challenge-bound access for history; the
-statement key, the log key, and every property of the log; the proof statements and the
-circuit (the path shape and the fold are untouched — only placement and delivery change);
+statement key, the log key, and every property of the log; the proof statements' shape — the path and the fold are untouched (only placement and
+delivery change), and the one circuit change is the absence clause hashing its key;
 the vouching protocol; what a seized, unlocked device reveals (§15 — a Persora home is a
 membership by definition, and the inbox key sits inside that boundary, not beyond it).
 
@@ -310,27 +334,35 @@ membership by definition, and the inbox key sits inside that boundary, not beyon
 §5.2 (witness-service paragraph replaced by delivery-in-the-broadcast and the placement
 rule), §11 (envelope, body, single-body rule, `K_fetch`; the `K_witness` sentence
 removed), §4.1/§5.3/§9.3 (inbox key registered at founding, admission, migration;
-Path 1's four-step sequence; Path 2's cut), §9.1/§9.2 (inbox key as member material
-outside the derived hierarchy, wrapped where wrapping is in force), §15 (inbox key
+Path 1's four-step sequence; Path 2's cut), §6.5 (instances re-pinned), §9.1/§9.2
+(inbox key as member material outside the derived hierarchy, wrapped where wrapping is in
+force; `REVOKE` and `RETIRE_CERT` in the field-domain registry; the absence clause over
+`Poseidon(REVOKE, leaf)`), §15 (inbox key
 replaces the position entry; envelope size; stolen-inbox-key scope; renewal signal;
 retirement's batch linkability), §16.4 (the size ceiling and the whole-download rule),
 0024's status note. Crates: `nymora-core` (inbox key types, envelope and body), `nymora-
 crypto` (X25519, ChaCha20-Poly1305 behind the existing HKDF; vectors), `nymora-ports`
-(`Slot::InboxKey`), `nymora-protocol` (create/migrate register the key; `accept_bulletin`
+(`Slot::InboxKey`), `nymora-circuits`/`nymora-plonk` (the absence clause; re-pinned
+instances and known-answer pins), `nymora-protocol` (create/migrate register the key; `accept_bulletin`
 takes envelope and own ciphertext; operator builds the envelope; `witness()` removed;
 renewal and retirement), conformance vectors, CHANGELOG. Skiora and Persora follow.
 
-## Open questions
+## Questions resolved before applying
 
-1. **Horizon.** Default and minimum, and whether it is a per-agora policy value (§4.3's
-   machine can set it) or an operator parameter.
-2. **Retirement's proof.** Confirm the migration circuit's certificate clause can be reused
-   under a new message domain without a new instance (0034 pins instances; a new public
-   input shape is a new instance).
-3. **Ephemeral key per boundary versus per member.** One ephemeral saves 32 bytes per
-   ciphertext; a per-member ephemeral would let ciphertexts be produced incrementally
-   between boundaries. The single ephemeral is proposed; the trade is recorded.
-4. **Exclusion sets in the body.** They travel whole as today. Whether the revocation set
-   should hold `Poseidon(leaf, REVOKE)` rather than the leaf — so that even the body's
-   contents cross-reference with nothing — is a hygiene change for a separate proposal;
-   it touches the absence clause in the circuit.
+Raised in the draft, decided in session, recorded here so the argument survives:
+
+1. **Horizon** — a per-agora policy value through §4.3's machine, not an operator
+   parameter: it prices a member's exposure (an un-wiped old device's reading window)
+   against the operator's envelope size, and that is the agora's trade to make. Adding
+   the value to the policy decision changes that decision's content bytes and therefore
+   its subject derivation (0021) — a wire event at the tag bump, acceptable because the
+   protocol is pre-release. Default 365, floor 7.
+2. **Retirement's proof** — the migration circuit's certificate clause *is* reusable under
+   a new message domain; the instance question is deferred to apply time (above).
+3. **Ephemeral key** — one per boundary. Ciphertexts are produced at the boundary, in one
+   pass, from one snapshot; incremental production between boundaries would only matter
+   if the envelope were ever partially served, which the whole-download rule forbids.
+4. **Exclusion sets in the body** — decided *into* this proposal rather than deferred: the
+   revocation set holds `Poseidon(REVOKE, leaf)`, with the limit of what that buys stated
+   in the Decision. The spend set already holds nullifiers derived under a durable secret
+   and needs nothing.
