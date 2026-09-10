@@ -213,6 +213,79 @@ fn every_vector_matches() {
 
                 // The one construction whose output is not 32 bytes: the SAS is short by
                 // design, so it is compared directly rather than through `check`.
+                "content_hash" => {
+                    let hashed = nymora_crypto::message_hash(&bytes(case, "content"));
+                    check(&construction.name, case, hashed.as_bytes());
+                }
+
+                "armor" => {
+                    use nymora_crypto::armor::{armor, unarmor, Kind};
+                    let name = case["name"].as_str().unwrap_or("<unnamed>");
+                    let text = case["text"].as_str().expect("armor text");
+                    let mut out = vec![0u8; text.len()];
+                    match case.get("kind") {
+                        Some(kind) => {
+                            let kind = Kind::from_byte(kind.as_u64().expect("kind") as u8)
+                                .expect("a known kind");
+                            let payload = bytes(case, "payload");
+                            if case.get("decode_only").is_none() {
+                                let mut armored = vec![0u8; text.len()];
+                                let len = armor(kind, &payload, &mut armored).expect("armors");
+                                assert_eq!(
+                                    core::str::from_utf8(&armored[..len]).unwrap(),
+                                    text,
+                                    "armor/{name} does not match its vector"
+                                );
+                            }
+                            let (decoded_kind, len) =
+                                unarmor(text.as_bytes(), &mut out).expect("unarmors");
+                            assert_eq!(decoded_kind, kind, "armor/{name} kind");
+                            assert_eq!(&out[..len], payload.as_slice(), "armor/{name} payload");
+                        }
+                        None => assert!(
+                            unarmor(text.as_bytes(), &mut out).is_err(),
+                            "armor/{name} must be refused"
+                        ),
+                    }
+                }
+
+                "invitation" => {
+                    use nymora_core::{FetchKey, Invitation, PolicyClass};
+                    let name = case["name"].as_str().unwrap_or("<unnamed>");
+                    match case.get("bytes") {
+                        Some(_) => assert!(
+                            Invitation::decode(&bytes(case, "bytes")).is_err(),
+                            "invitation/{name} must be refused"
+                        ),
+                        None => {
+                            let server = case["server"].as_str().expect("server");
+                            let invitation = Invitation {
+                                agora: AgoraId::from_bytes(array(case, "agora_id")),
+                                policy_class: PolicyClass::from_bytes(array(case, "policy_class")),
+                                statement_key: array(case, "statement_key"),
+                                log_key: array(case, "log_key"),
+                                fetch_key: FetchKey::new(array(case, "fetch_key")),
+                                epoch: Epoch::new(case["epoch"].as_u64().expect("epoch")),
+                                interval_seconds: case["interval_seconds"]
+                                    .as_u64()
+                                    .expect("interval"),
+                                valid_through: Epoch::new(
+                                    case["valid_through"].as_u64().expect("valid_through"),
+                                ),
+                                server,
+                            };
+                            let mut encoded = vec![0u8; invitation.encoded_len()];
+                            let len = invitation.encode(&mut encoded).expect("encodes");
+                            assert_eq!(
+                                &encoded[..len],
+                                bytes(case, "output").as_slice(),
+                                "invitation/{name} does not match its vector"
+                            );
+                            assert_eq!(Invitation::decode(&encoded[..len]).unwrap(), invitation);
+                        }
+                    }
+                }
+
                 "live_auth_sas" => {
                     let short = live_auth::sas(&SessionContext::from_bytes(array(case, "context")));
                     assert_eq!(

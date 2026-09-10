@@ -77,6 +77,24 @@ based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   mechanism changes.
 
 ### Added
+- **Client interoperability: the invitation, the text armor, and the content hash**
+  (§6.1, new §17; proposals 0037 and 0038, applied). Two artifacts pass between
+  Persoras with no Skiora involved, and their forms are now fixed so clients made by
+  different hands read each other's. The **invitation** carries what a candidate can
+  only get from a member — server, agora, class, statement key, log key — plus the
+  inviter's current fetch key, so a freshly landed member fetches their first envelope
+  with no operator hand-off; it is a members-only artifact (the fetch key's blast
+  radius) and unsigned by argument (the invitee cannot verify a member's bundle). The
+  **armor** is one text form for every client-to-client artifact: `nymora1` ‖
+  base64url of `kind ‖ payload ‖ check`, with a kind byte that routes it and a 4-byte
+  checksum under `nymora/v0/armor` covering prefix, kind, and payload; decoding
+  ignores whitespace and one pair of quotes. `Hash(M)` for bundles is now normative:
+  the byte-family hash under `nymora/v0/content` — before this it was host-defined
+  and two clients could attest different bundles for the same bytes. New:
+  `nymora_core::Invitation` (versioned codec), `nymora_crypto::armor`,
+  `nymora_crypto::message_hash`, domains `Armor` and `Content`, and conformance
+  vectors for all three (computed independently of the implementation). Skiora is
+  unchanged.
 - **The circuit's concrete instances are pinned** (§5.2, §6.5, §9.1; proposal 0034,
   applied). The three instance-level facts proposal 0033 left open are now named, each
   verified against a running circuit before being written down. The Poseidon instance:

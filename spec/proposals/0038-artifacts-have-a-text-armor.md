@@ -1,7 +1,7 @@
 # Proposal 0038 — Artifacts have a text armor
 
-**Status:** Proposed
-**Affects:** a new §17 (client interoperability), §17.2; no change to Skiora's surfaces
+**Status:** **Applied** — §17.2 and §17.3 are now normative in the specification, and §6.1 names the content hash
+**Affects:** §6.1, §17.2, §17.3 (new); no change to Skiora's surfaces
 **Companion:** [proposal 0037](0037-an-invitation-is-a-client-artifact.md)
 
 > **Found designing the first native client.** Bundles (§6.6) are bytes, and the
@@ -36,7 +36,8 @@ verdict, and say what kind of artifact it is so a client can route it without gu
 
 ```
 armor := "nymora1" ‖ base64url_nopad( kind(1) ‖ payload ‖ check(4) )
-check  = first 4 bytes of the byte-family hash under "nymora/v0/armor" over kind ‖ payload
+check  = first 4 bytes of the byte-family hash under "nymora/v0/armor"
+         over prefix ‖ kind ‖ payload, each length-framed
 ```
 
 - **`nymora1`** is the prefix and the version: a future incompatible armor is `nymora2`.
@@ -57,6 +58,13 @@ check  = first 4 bytes of the byte-family hash under "nymora/v0/armor" over kind
   (§8.3's SAS is the same construction under its own domain tag), truncated to four
   bytes: enough to catch truncation and transcription, not a security boundary — the
   artifact inside carries its own proof or is public data.
+
+**The content hash is named with it.** §6.1 writes `message_hash = Hash(M)` and the
+reference client chose SHA-256 by itself ("host-defined"). Two clients must agree, or
+one verifies the other's bundle as corrupt on honest input. `Hash(M)` is therefore
+the byte-family hash under `nymora/v0/content` over the content bytes, framed like
+every byte-family input — stated in §6.1 and §17.3. Found by the iOS design review:
+phase 1's acceptance test (a phone attests, the CLI verifies) fails without it.
 
 **Files carry the same bytes, unarmored.** A `.nymora` file is `kind ‖ payload ‖ check`
 exactly, so a file and an armored string are the same object with and without the
@@ -86,10 +94,7 @@ armor makes artifacts *recognisable*, not *attributable*.
 
 ## Open questions
 
-1. Whether `check` should cover the prefix as well, so `nymora1…` pasted into a
-   `nymora2` decoder fails by checksum rather than by version. The version is the
-   first thing a decoder reads, so the failure is loud either way; covering it costs
-   nothing and is proposed as the default.
+1. ~~Whether `check` should cover the prefix as well~~ — resolved on applying: it does.
 2. A word-based rendering (the SAS style) for the short kinds — session and proposal
    codes, challenge phrases — for reading aloud. Presentation; the armor is the
    interchange form.

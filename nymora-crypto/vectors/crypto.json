@@ -3,7 +3,7 @@
   "constructions": [
     {
       "name": "hash",
-      "spec": "\u00a76.5",
+      "spec": "§6.5",
       "status": "settled",
       "cases": [
         {
@@ -44,7 +44,7 @@
     },
     {
       "name": "kdf",
-      "spec": "\u00a79.1",
+      "spec": "§9.1",
       "status": "settled",
       "cases": [
         {
@@ -58,7 +58,7 @@
     },
     {
       "name": "agora_id",
-      "spec": "\u00a73",
+      "spec": "§3",
       "status": "settled",
       "cases": [
         {
@@ -77,7 +77,7 @@
     },
     {
       "name": "policy_class",
-      "spec": "\u00a75.2",
+      "spec": "§5.2",
       "status": "settled",
       "cases": [
         {
@@ -90,7 +90,7 @@
     },
     {
       "name": "commit",
-      "spec": "\u00a79.1",
+      "spec": "§9.1",
       "status": "settled",
       "cases": [
         {
@@ -105,7 +105,7 @@
     },
     {
       "name": "nullifier",
-      "spec": "\u00a74.3, \u00a75.3, \u00a76.1, \u00a79.3",
+      "spec": "§4.3, §5.3, §6.1, §9.3",
       "status": "settled",
       "cases": [
         {
@@ -144,7 +144,7 @@
     },
     {
       "name": "live_auth_commitment",
-      "spec": "\u00a78.1",
+      "spec": "§8.1",
       "status": "settled",
       "cases": [
         {
@@ -157,7 +157,7 @@
     },
     {
       "name": "live_auth_context",
-      "spec": "\u00a78.1",
+      "spec": "§8.1",
       "status": "settled",
       "cases": [
         {
@@ -174,7 +174,7 @@
     },
     {
       "name": "live_auth_sas",
-      "spec": "\u00a78.3",
+      "spec": "§8.3",
       "status": "settled",
       "cases": [
         {
@@ -186,7 +186,7 @@
     },
     {
       "name": "pseudonym",
-      "spec": "\u00a78.1",
+      "spec": "§8.1",
       "status": "settled",
       "cases": [
         {
@@ -200,7 +200,7 @@
     },
     {
       "name": "derive_tag_key",
-      "spec": "\u00a76.4",
+      "spec": "§6.4",
       "status": "settled",
       "cases": [
         {
@@ -214,7 +214,7 @@
     },
     {
       "name": "derive_fetch_key",
-      "spec": "\u00a711",
+      "spec": "§11",
       "status": "settled",
       "cases": [
         {
@@ -228,7 +228,7 @@
     },
     {
       "name": "tag",
-      "spec": "\u00a76.4",
+      "spec": "§6.4",
       "status": "settled",
       "cases": [
         {
@@ -247,7 +247,7 @@
     },
     {
       "name": "epoch_cert_message",
-      "spec": "\u00a79.1",
+      "spec": "§9.1",
       "status": "settled",
       "cases": [
         {
@@ -261,7 +261,7 @@
     },
     {
       "name": "migration_cert_message",
-      "spec": "\u00a79.3",
+      "spec": "§9.3",
       "status": "settled",
       "cases": [
         {
@@ -274,7 +274,7 @@
     },
     {
       "name": "certificate_sign",
-      "spec": "\u00a79.1",
+      "spec": "§9.1",
       "status": "settled",
       "cases": [
         {
@@ -288,19 +288,19 @@
     },
     {
       "name": "subgroup_check",
-      "spec": "\u00a79.1",
+      "spec": "§9.1",
       "status": "settled",
       "cases": [
         {
           "name": "order-2-torsion-point-refused",
           "point": "00000000fffffffffe5bfeff02a4bd5305d8a10908d83933487d9d2953a7ed73",
-          "note": "the canonical encoding of the order-2 point (0, -1): on the curve, outside the prime-order subgroup. Every construction that admits a witnessed point must refuse it (the \u00a79.1 cofactor clause). This case pins a refusal and carries no output."
+          "note": "the canonical encoding of the order-2 point (0, -1): on the curve, outside the prime-order subgroup. Every construction that admits a witnessed point must refuse it (the §9.1 cofactor clause). This case pins a refusal and carries no output."
         }
       ]
     },
     {
       "name": "revocation_key",
-      "spec": "\u00a711",
+      "spec": "§11",
       "status": "settled",
       "cases": [
         {
@@ -312,7 +312,7 @@
     },
     {
       "name": "inbox_cert_message",
-      "spec": "\u00a79.3, \u00a711",
+      "spec": "§9.3, §11",
       "status": "settled",
       "cases": [
         {
@@ -321,6 +321,114 @@
           "action": "renew",
           "inbox_public_key": "1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b",
           "output": "7d32aa7b1dd51fa3510208c725924dbe5f168b94403ddbd7cb1d36f141d4f123"
+        }
+      ]
+    },
+    {
+      "name": "content_hash",
+      "spec": "§6.1, §17.3",
+      "status": "settled",
+      "cases": [
+        {
+          "name": "empty",
+          "content": "",
+          "output": "e76a604af9e3440b2ae1507e5ab79402d15d0a0bfbbcb8fd93527f16be8d4a47"
+        },
+        {
+          "name": "short-text",
+          "content": "74686520766f75636820636861696e2068656c643a20616c696365202d3e20626f62202d3e206361726f6c0a",
+          "output": "5ade3ceff37f6b7b5a0cc7348c6867acf41dfa27edafb5321bca964845d12cbc"
+        },
+        {
+          "name": "binary",
+          "content": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f606162636465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9fa0a1a2a3a4a5a6a7a8a9aaabacadaeafb0b1b2b3b4b5b6b7b8b9babbbcbdbebfc0c1c2c3c4c5c6c7c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7e8e9eaebecedeeeff0f1f2f3f4f5f6f7f8f9fafbfcfdfeff",
+          "output": "eebe3f85c70d805de433106287103c3cc4cf9096b0bb381aa55b471af9eb3142"
+        }
+      ]
+    },
+    {
+      "name": "armor",
+      "spec": "§17.2",
+      "status": "settled",
+      "cases": [
+        {
+          "name": "bundle-kind-short",
+          "kind": 1,
+          "payload": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "text": "nymora1AaqqqqqqqqqqqqqqqqqqqqqqqqqqC19qNg"
+        },
+        {
+          "name": "invitation-kind-empty",
+          "kind": 2,
+          "payload": "",
+          "text": "nymora1Au5VTv4"
+        },
+        {
+          "name": "session-code",
+          "kind": 3,
+          "payload": "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a5555555555555555555555555555555555555555555555555555555555555555",
+          "text": "nymora1AwoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVhyvW5"
+        },
+        {
+          "name": "challenge-kind",
+          "kind": 5,
+          "payload": "6e796d6f7261206368616c6c656e676520616d6265722d6c616e7465726e2d34343731",
+          "text": "nymora1BW55bW9yYSBjaGFsbGVuZ2UgYW1iZXItbGFudGVybi00NDcx5yg69Q"
+        },
+        {
+          "name": "wrapped-and-quoted",
+          "kind": 1,
+          "payload": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "text": "\"nymora1Aaqqq\nqqqqqqqqqqqq qqqqqqqqqqqC19qNg\"",
+          "decode_only": true
+        },
+        {
+          "name": "rejected-truncated",
+          "text": "nymora1AaqqqqqqqqqqqqqqqqqqqqqqqqqqC19"
+        },
+        {
+          "name": "rejected-checksum",
+          "text": "nymora1AaqqqqqqqqqqqqqqqqqqqqqqqqqqC19qNB"
+        },
+        {
+          "name": "rejected-padding",
+          "text": "nymora1AaqqqqqqqqqqqqqqqqqqqqqqqqqqC19qNg="
+        },
+        {
+          "name": "rejected-unknown-kind",
+          "text": "nymora1CXh4tDpaUQ"
+        },
+        {
+          "name": "rejected-wrong-prefix",
+          "text": "nymora2AaqqqqqqqqqqqqqqqqqqqqqqqqqqC19qNg"
+        }
+      ]
+    },
+    {
+      "name": "invitation",
+      "spec": "§17.1",
+      "status": "settled",
+      "cases": [
+        {
+          "name": "no-log-key",
+          "agora_id": "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+          "policy_class": "0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c",
+          "statement_key": "0505050505050505050505050505050505050505050505050505050505050505",
+          "log_key": "0000000000000000000000000000000000000000000000000000000000000000",
+          "fetch_key": "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+          "epoch": 7,
+          "interval_seconds": 86400,
+          "valid_through": 8,
+          "server": "http://127.0.0.1:8080",
+          "output": "010a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c050505050505050505050505050505050505050505050505050505050505050500000000000000000000000000000000000000000000000000000000000000000f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0700000000000000805101000000000008000000000000001500000000000000687474703a2f2f3132372e302e302e313a38303830"
+        },
+        {
+          "name": "rejected-version",
+          "bytes": "020a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c050505050505050505050505050505050505050505050505050505050505050500000000000000000000000000000000000000000000000000000000000000000f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0700000000000000805101000000000008000000000000001500000000000000687474703a2f2f3132372e302e302e313a38303830"
+        },
+        {
+          "name": "rejected-clock",
+          "bytes": "010a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c050505050505050505050505050505050505050505050505050505050505050500000000000000000000000000000000000000000000000000000000000000000f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0700000000000000805101000000000006000000000000001500000000000000687474703a2f2f3132372e302e302e313a38303830"
         }
       ]
     }

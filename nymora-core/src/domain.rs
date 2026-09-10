@@ -245,6 +245,13 @@ domains! {
     /// per-agora policy value bounding how many boundaries an inbox registration lasts
     /// before it must be renewed.
     ProposalHorizon => "nymora/v0/proposal/horizon",
+
+    /// The armor checksum over a client-to-client artifact (§17.2, proposal 0038):
+    /// absorbs the prefix, the kind byte, and the payload, each framed.
+    Armor => "nymora/v0/armor",
+
+    /// The content hash a bundle attests — `Hash(M)` of §6.1 (§17.3, proposal 0038).
+    Content => "nymora/v0/content",
 }
 
 /// The field-domain registry: the constants leading every derivation the standardized

@@ -31,7 +31,9 @@
 #![no_std]
 
 pub mod agora_id;
+pub mod armor;
 pub mod commit;
+pub mod content;
 pub mod fetch_key;
 pub mod field;
 pub mod hash;
@@ -46,6 +48,7 @@ pub mod signature;
 pub mod tag;
 
 pub use commit::commit;
+pub use content::message_hash;
 pub use fetch_key::derive_fetch_key;
 pub use field::F;
 pub use hash::{ByteHasher, HashBackend, Hasher, Sha256Backend};

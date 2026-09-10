@@ -331,7 +331,7 @@ POST /agora/{agora_id}/proofs/message-attestation
   → { attestation_proof, nullifier: N_msg }
 ```
 
-The proof is bound to `message_hash` via the Fiat-Shamir challenge, so it cannot be detached and reattached to different content. `N_msg = Hash(sk, message_hash, agora_id)` is namespace- and message-bound, preventing replay across agoras or across different content.
+`Hash(M)` is the byte-family hash under the `nymora/v0/content` domain over the content bytes (§17.3, proposal 0038) — normative, because two clients that hashed content differently would attest different bundles for the same bytes. The proof is bound to `message_hash` via the Fiat-Shamir challenge, so it cannot be detached and reattached to different content. `N_msg = Hash(sk, message_hash, agora_id)` is namespace- and message-bound, preventing replay across agoras or across different content.
 
 **No persistent authorship pseudonym is included in the externally-shared bundle.** A stable, per-author identifier would be exactly as recognizable to an outside observer collecting multiple pieces of content as it would be to a legitimate member — recognition and linkability are the same property viewed from two angles. There is no way to grant outsiders zero linkage while granting members full linkage using a single shared field, so no such field exists in the external bundle.
 
@@ -1093,3 +1093,52 @@ Nothing limits membership count cryptographically, but two costs grow with it:
 - **The boundary envelope grows with live credentials** (§11, proposal 0036): one ciphertext per credential per class it holds, roughly `32·⌈log₂N⌉ + 64` bytes each — about 0.4 MB per epoch at a thousand members, 5 MB at ten thousand, 60 MB at a hundred thousand — since a path carries only the siblings below the tree's occupied height. Fine at daily epochs to ten thousand, tolerable at a hundred thousand on clearnet, heavy over Tor. The whole-download is the privacy-preserving mode: a member fetching only their own ciphertext by index presents their position per epoch, the correlation per-member delivery otherwise removes (§15). A large agora may choose the indexed fetch as a documented downgrade over an unlinkable transport; the default is the whole envelope.
 
 Persora should make the number of held memberships visible to the member, since the operational cost of each — migration burden, network discipline, recovery exposure — is borne by them and is not otherwise apparent.
+
+---
+
+## 17. Client Interoperability
+
+Sections 1–16 specify what passes between a Persora and a Skiora, and what a Persora proves. Some artifacts pass between *Persoras* with no Skiora involved, and their forms are fixed here so that clients made by different hands read each other's (proposals 0037, 0038). Nothing in this section is a protocol message — Skiora never sees an invitation or an armored string — and none of it changes any proof, root, statement, or key.
+
+### 17.1 The invitation
+
+A candidate can do nothing until a member tells them the operator's address, the `agora_id`, the policy class, and the **statement key** to pin (§11); a freshly landed member holds no fetch key with which to fetch their first envelope; and the epoch interval is served nowhere on the member plane. An **invitation** is the one object carrying all of that, produced by a member's client and consumed by a candidate's:
+
+```
+invitation := version(1) ‖ agora_id(32) ‖ policy_class(32) ‖ statement_key(32)
+            ‖ log_key(32)               -- all-zero when the agora publishes no log
+            ‖ fetch_key(32)             -- the inviter's current fetch key (§11)
+            ‖ epoch(8, u64 LE)          -- the epoch that fetch key belongs to
+            ‖ interval(8, u64 LE)       -- the agora's epoch interval, in seconds
+            ‖ valid_through(8, u64 LE)  -- last epoch at which fetch_key is still served
+            ‖ server(length-framed UTF-8)
+version = 1
+```
+
+**The fetch key is included deliberately.** A fetch key is served for the host's catch-up window, so an invitation issued at epoch *e* fetches the envelopes of *e* and the boundaries inside the window — enough to land and receive with no operator hand-off. The inviter could hand the key over in any case; the object grants nothing a member could not already tell the invitee. **What it costs:** the fetch key's blast radius (§11, §15) — that the agora exists and how many ciphertexts it publishes — is available to an invitee who never completes admission, for the window. An invitation is therefore a **members-only artifact**: sent over a channel the inviter trusts, never posted publicly, presented as such by clients, and refused by a consuming client past `valid_through` rather than tried against a dead key.
+
+**Unsigned, deliberately.** A signature by the inviter's credential would be an authorship bundle (§6.6) over the invitation, which the invitee — not yet a member — cannot verify (§7). The statement key is trusted exactly as far as whoever handed over the invitation, which is the trust admission already rests on (§5.3: "real-world vetting happens off-system"); a client shows the key's fingerprint so that it *can* be compared out of band, and does not pretend the object proves anything. `interval` and `valid_through` are advisory — clocks and deadlines, nothing cryptographic; a wrong value produces a wrong deadline, not a wrong proof. A decoder refuses an unknown version, truncation, trailing bytes, a non-UTF-8 address, and `valid_through < epoch`.
+
+A member who has missed the window recovers the same way a new member starts: a fresh fetch key from any member — an invitation is already that object.
+
+### 17.2 The text armor
+
+Bundles, invitations, session and proposal codes, challenge answers, and live-authentication tokens travel through channels that carry text, wrap it, and mangle what is not text. One armor covers them all:
+
+```
+armor := "nymora1" ‖ base64url_nopad( kind(1) ‖ payload ‖ check(4) )
+check  = first 4 bytes of the byte-family hash under "nymora/v0/armor"
+         over prefix ‖ kind ‖ payload, each length-framed
+```
+
+- `nymora1` is the prefix and the version; an incompatible successor is `nymora2`. It is the only part a human is expected to recognise.
+- base64url without padding (RFC 4648 §5): no `+`, `/`, or `=`.
+- A decoder **ignores whitespace** — spaces, line breaks, tabs — anywhere after the prefix, tolerates one surrounding pair of straight or smart quotes, and accepts nothing else: a padding character, an invalid character, a truncated string, a checksum mismatch, an unknown kind, or a wrong prefix is refused.
+- `kind` routes the artifact: `1` bundle (§6.6); `2` invitation (§17.1); `3` vouch session code (`agora_id ‖ session_id`, §5.3); `4` proposal code (`agora_id ‖ subject`, §4.3); `5` challenge answer — a bundle whose content is a challenge phrase, the same bytes as kind 1, the kind telling the recipient's client to match it against an outstanding challenge; `6`, `7`, `8` the live-authentication commitment, reveal, and pseudonym-with-proof (§8.1). Unknown kinds are refused, not skipped.
+- `check` is the short-digest construction §8.3's SAS already uses, under its own domain and covering the prefix so that a string pasted into a decoder of another version fails by checksum as well as by version. It catches truncation and transcription; it is not a security boundary — the artifact inside carries its own proof or is public data.
+
+**Files carry the same bytes, unarmored**: a `.nymora` file is `kind ‖ payload ‖ check` exactly, so a file and an armored string are one object with and without the text envelope; the file-type identifier a platform registers is not protocol. **Uniformity is preserved**: every armored bundle has the shape and length distribution of every other, across agoras, because the bundle inside does (§6.5); the armor adds a constant prefix and a fixed trailer. The prefix does announce "a Nymora artifact", which a bundle's fixed size already announced to anyone who knew to look — the armor makes artifacts *recognisable*, not *attributable*. A bundle of ~3.5 kB armors to ~4.7 kB of text.
+
+### 17.3 The content hash
+
+`message_hash = Hash(M)` (§6.1) is the byte-family hash under `nymora/v0/content` over the content bytes, length-framed like every byte-family input. It is normative for the reason §17 exists: a bundle attested by one client is verified by another, and both must compute the same `message_hash` from the same content or the verifier's integrity check (§6.6, §7) fails on honest input.

@@ -1,7 +1,7 @@
 # Proposal 0037 — An invitation is a client artifact
 
-**Status:** Proposed
-**Affects:** a new §17 (client interoperability), §17.1; no change to Skiora's surfaces
+**Status:** **Applied** — §17.1 is now normative in the specification
+**Affects:** §17.1 (new); no change to Skiora's surfaces
 **Depends on:** [proposal 0036](0036-the-boundary-broadcast-is-delivered-per-member.md) (the fetch key)
 **Companion:** [proposal 0038](0038-artifacts-have-a-text-armor.md) (how it travels)
 

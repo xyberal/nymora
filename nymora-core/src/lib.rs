@@ -38,6 +38,7 @@ mod epoch;
 mod error;
 mod handoff;
 mod inbox;
+mod invitation;
 mod policy;
 mod secret;
 
@@ -53,6 +54,7 @@ pub use epoch::Epoch;
 pub use error::{LocalReason, ProtocolError, Rejection};
 pub use handoff::{MigrationHandoff, HANDOFF_VERSION};
 pub use inbox::{InboxPublicKey, InboxTag, INBOX_PUBLIC_KEY_LEN, INBOX_TAG_LEN};
+pub use invitation::{Invitation, INVITATION_VERSION};
 pub use policy::PolicyClass;
 pub use secret::{
     BodyKey, CredentialKey, EpochSecretKey, FetchKey, InboxSecretKey, RootOpening, SecretBytes,
