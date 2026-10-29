@@ -1,0 +1,16 @@
+# cargo-audit configuration for the proving backend.
+#
+# Every ignore here names an advisory, says why it does not reach this crate, and says
+# what lifts it. An ignore without all three is a bug.
+
+[advisories]
+ignore = [
+    # RUSTSEC-2026-0387: timing variability in crypto-bigint 0.5.x operations meant to be
+    # constant-time. Reached only through k256 and p256 — the secp256k1 and P-256 curves
+    # that midnight-curves carries for its foreign-curve gadgets. Nymora's three
+    # statements run on BLS12-381 and Jubjub (proposals 0033, 0034) and never execute
+    # secp256k1 or P-256 arithmetic, so no secret of this protocol passes through the
+    # affected code. The fix is crypto-bigint >= 0.7.6, a major the pinned
+    # elliptic-curve 0.13 cannot take; lifted when midnight-curves moves past it.
+    "RUSTSEC-2026-0387",
+]
