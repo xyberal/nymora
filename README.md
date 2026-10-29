@@ -1,5 +1,9 @@
 # Nymora
 
+> **Status: pre-release draft, unaudited.** Complete protocol logic on the real
+> primitives, tagged `v0.0.x-draft`; not deployable, and not yet something to protect
+> anyone with. Details at the end of this file and in [SECURITY.md](SECURITY.md).
+
 Reference implementation of the **Nymora protocol** — anonymous, vouched, tiered group
 membership and content provenance.
 
@@ -23,7 +27,7 @@ supply those through the trait interfaces in [`nymora-ports`](nymora-ports).
 |---|---|
 | `nymora-core` | Shared types, wire formats, the domain registry, secret newtypes, errors |
 | `nymora-crypto` | The two hash families (SHA-256 byte family; the pinned Poseidon instance), the field crossing, commitments, nullifiers, the §9.1 certificate scheme, tags, KDF, `agora_id` and live-auth derivations |
-| `nymora-circuits` | The two proof statements, the `ProofSystem` boundary, and the stub evaluator for tests |
+| `nymora-circuits` | The three proof statements (chain, migration, inbox), the `ProofSystem` boundary, and the stub evaluator for tests |
 | `nymora-accumulator` | Positional Merkle accumulator and the keyed exclusion sets |
 | `nymora-proofs` | The per-action prove/verify surface |
 | `nymora-protocol` | Credential lifecycle and state machines, both roles |
@@ -54,7 +58,7 @@ dual licensed as above, without any additional terms or conditions.
 > Status: **complete protocol logic on the real primitives.** Both roles' state
 > machines run the whole lifecycle end-to-end — bootstrap, vouching, content, revocation,
 > migration, dissolution — over the pinned Poseidon instance and the §9.1 certificate
-> scheme, and the real circuits prove both statements behind the `ProofSystem` boundary
+> scheme, and the real circuits prove all three statements behind the `ProofSystem` boundary
 > (the `nymora-plonk` crate, standalone beside the workspace; proposals 0033–0035).
 > [ARCHITECTURE.md](ARCHITECTURE.md) says exactly where each line sits.
 >

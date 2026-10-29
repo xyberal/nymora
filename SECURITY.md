@@ -2,10 +2,10 @@
 
 ## Status, stated plainly
 
-Nymora is a **pre-release design draft** (protocol version `0.0.0`). It has had **no
+Nymora is a **pre-release design draft** (the `v0.0.x-draft` tag series). It has had **no
 independent security audit** — and neither has the third-party proving stack the real
 circuits build on. The primitives are real (the pinned Poseidon instance, the §9.1
-certificate scheme, the gap-tree exclusion sets) and both statements prove in zero
+certificate scheme, the gap-tree exclusion sets) and all three statements prove in zero
 knowledge behind the `ProofSystem` boundary, but nothing here is deployable. **Do not
 use this to protect anyone.** The threat model this project is written against involves
 people whose safety depends on the guarantees holding — until independent review has

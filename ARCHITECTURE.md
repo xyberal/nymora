@@ -77,7 +77,7 @@ nymora-core          types, wire formats, both domain registries, errors
    │      ├── nymora-accumulator    positional accumulator (§5.2) and the gap-tree
    │      │        │                exclusion sets with non-membership witnesses
    │      │        │                (§9.1, §11)
-   │      └────────┴── nymora-circuits   the two proof statements as types, the
+   │      └────────┴── nymora-circuits   the three proof statements as types, the
    │             │                       `ProofSystem` boundary, and the stub
    │             │                       evaluator for tests (§6.5)
    │             └── nymora-proofs       the per-action prove/verify surface
